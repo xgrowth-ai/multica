@@ -444,7 +444,8 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 // Downloads are limited to 100 MB to match the upload size limit.
 //
 // The URL may be absolute (a signed CloudFront/S3 URL) or relative
-// (a server-relative path like "/uploads/...") depending on how the
+// (a server-relative path like "/api/attachments/{id}/download" or
+// "/uploads/...") depending on how the
 // server is configured. Relative URLs are resolved against the client's
 // BaseURL and sent with the standard auth headers; absolute URLs are
 // used as-is so that their query-string signatures are not disturbed.

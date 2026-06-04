@@ -85,14 +85,18 @@ Multica はユーザーがアップロードした添付ファイル（コメン
 | `S3_REGION` | `us-west-2` | AWS リージョン。バケットの実際のリージョンと一致する必要があります — SDK 署名と公開 URL の構築の両方に使われます |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 空 | 静的な認証情報。両方を設定しない場合は AWS SDK のデフォルト認証情報チェーン（IAM role / 環境認証情報）が使われます |
 | `AWS_ENDPOINT_URL` | 空 | カスタムの S3 互換エンドポイント（例: [MinIO](https://min.io/)）。これを設定すると path-style URL に切り替わります |
+| `ATTACHMENT_DOWNLOAD_MODE` | `auto` | 添付ファイルのダウンロード方式: `auto`、`cloudfront`、`presign`、`proxy`。`auto` では CloudFront が完全に設定されている場合は優先し、内部/プライベート endpoint host は server proxy、公開 S3 互換 endpoint は対応時に presigned GET を使います |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | CloudFront signed URL と S3 presigned download URL の有効期間。Go duration 形式を受け付けます |
 
 **`S3_BUCKET` を設定しない場合**: サーバーは起動時に `"S3_BUCKET not set, cloud upload disabled"` をログに記録し、すべてのアップロードはローカルディスクにフォールバックします。
 
-**公開 URL** は次の優先順位で構築されます。
+**保存されるオブジェクト URL** は次の優先順位で構築されます。
 
 1. `CLOUDFRONT_DOMAIN` が設定されている場合は `https://<CLOUDFRONT_DOMAIN>/<key>`。
 2. `AWS_ENDPOINT_URL` が設定されている場合は `<AWS_ENDPOINT_URL>/<S3_BUCKET>/<key>`（path-style）。
 3. `https://<S3_BUCKET>.s3.<S3_REGION>.amazonaws.com/<key>`（virtual-hosted-style）。`S3_BUCKET` にドットが含まれる場合、AWS が発行するワイルドカード TLS 証明書がドットを含むバケットホストを検証できないため、サーバーは `https://s3.<S3_REGION>.amazonaws.com/<S3_BUCKET>/<key>`（path-style）にフォールバックします。
+
+API の `download_url` は、CloudFront 署名が設定されていない場合 `GET /api/attachments/{id}/download` を使います。この endpoint は安全な場合 CloudFront/S3 presigned URL にリダイレクトし、`http://rustfs:9000` のようなプライベート/内部 endpoint では server がストリーミングします。Docker/VPC 内部のオブジェクトストアでは `ATTACHMENT_DOWNLOAD_MODE=proxy` を明示できます。
 
 ### ローカルディスク（S3 が設定されていない場合）
 
