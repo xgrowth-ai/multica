@@ -8,6 +8,8 @@ import {
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  DesignDraftSchema,
+  ListDesignDraftsResponseSchema,
   ChatDraftRestoresResponseSchema,
   CreateFeedbackResponseSchema,
   DuplicateIssueErrorBodySchema,
@@ -32,6 +34,22 @@ import {
   TimelineEntriesSchema,
   UserSchema,
 } from "./schemas";
+
+describe("design draft response schemas", () => {
+  it("defaults missing list fields for older or drifting servers", () => {
+    expect(ListDesignDraftsResponseSchema.parse({})).toEqual({
+      design_drafts: [],
+      preview_enabled: false,
+    });
+  });
+
+  it("rejects a malformed design draft without trusting file metadata", () => {
+    expect(
+      DesignDraftSchema.safeParse({ id: "draft-1", files: "not-an-array" })
+        .success,
+    ).toBe(false);
+  });
+});
 import { parseWithFallback } from "./schema";
 
 const baseIssue = {

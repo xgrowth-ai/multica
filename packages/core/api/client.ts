@@ -145,6 +145,9 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  DesignDraft,
+  ListDesignDraftsResponse,
+  DesignDraftPreviewToken,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
@@ -214,6 +217,11 @@ import {
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
+  DesignDraftSchema,
+  ListDesignDraftsResponseSchema,
+  DesignDraftPreviewTokenSchema,
+  EMPTY_DESIGN_DRAFT,
+  EMPTY_DESIGN_DRAFT_PREVIEW_TOKEN,
   SubscribersListSchema,
   TimelineEntriesSchema,
   UserSchema,
@@ -2146,6 +2154,31 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async listDesignDrafts(): Promise<ListDesignDraftsResponse> {
+    const raw = await this.fetch<unknown>("/api/design-drafts");
+    return parseWithFallback(raw, ListDesignDraftsResponseSchema, { design_drafts: [], preview_enabled: false }, { endpoint: "GET /api/design-drafts" });
+  }
+
+  async createDesignDraft(data: FormData): Promise<DesignDraft> {
+    const res = await this.fetchRaw("/api/design-drafts", { method: "POST", body: data });
+    const raw: unknown = await res.json();
+    return parseWithFallback<DesignDraft>(raw, DesignDraftSchema, EMPTY_DESIGN_DRAFT, { endpoint: "POST /api/design-drafts" });
+  }
+
+  async renameDesignDraft(id: string, name: string): Promise<DesignDraft> {
+    const raw = await this.fetch<unknown>(`/api/design-drafts/${id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+    return parseWithFallback<DesignDraft>(raw, DesignDraftSchema, EMPTY_DESIGN_DRAFT, { endpoint: "PATCH /api/design-drafts/:id" });
+  }
+
+  async deleteDesignDraft(id: string): Promise<void> {
+    await this.fetch(`/api/design-drafts/${id}`, { method: "DELETE" });
+  }
+
+  async createDesignDraftPreviewToken(id: string): Promise<DesignDraftPreviewToken> {
+    const raw = await this.fetch<unknown>(`/api/design-drafts/${id}/preview-token`, { method: "POST" });
+    return parseWithFallback<DesignDraftPreviewToken>(raw, DesignDraftPreviewTokenSchema, EMPTY_DESIGN_DRAFT_PREVIEW_TOKEN, { endpoint: "POST /api/design-drafts/:id/preview-token" });
   }
 
   // Project resources

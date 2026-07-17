@@ -80,6 +80,7 @@ type NavKey =
   | "myIssues"
   | "issues"
   | "projects"
+  | "designs"
   | "agents"
   | "runtimes"
   | "skills"
@@ -152,6 +153,7 @@ export function SearchCommand() {
     { key: "myIssues", label: t(($) => $.pages.my_issues), icon: CircleUser, keywords: ["my", "issues", "assigned", "我的"] },
     { key: "issues", label: t(($) => $.pages.issues), icon: ListTodo, keywords: ["issues", "tasks", "bugs"] },
     { key: "projects", label: t(($) => $.pages.projects), icon: FolderKanban, keywords: ["projects", "kanban", "项目"] },
+    { key: "designs", label: t(($) => $.pages.designs), icon: FolderKanban, keywords: ["designs", "prototypes", "设计稿", "原型"] },
     { key: "agents", label: t(($) => $.pages.agents), icon: Bot, keywords: ["agents", "bots", "ai"] },
     { key: "runtimes", label: t(($) => $.pages.runtimes), icon: Monitor, keywords: ["runtimes", "environments"] },
     { key: "skills", label: t(($) => $.pages.skills), icon: BookOpenText, keywords: ["skills", "library"] },

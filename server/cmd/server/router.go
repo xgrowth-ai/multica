@@ -211,6 +211,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
 		AttachmentFrameAncestors: origins,
+		DesignPreviewPublicURL:   strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PREVIEW_PUBLIC_URL")), "/"),
+		DesignPreviewSecret:      strings.TrimSpace(os.Getenv("MULTICA_DESIGN_PREVIEW_SECRET")),
 		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
 		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
 		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
@@ -714,6 +716,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	if _, ok := store.(*storage.LocalStorage); ok {
 		r.Get("/uploads/*", h.ServeLocalUpload)
 	}
+	r.Get("/p/{token}/*", h.ServeDesignDraftPreview)
 
 	// Auth (public) — per-IP rate limiting.
 	if rdb == nil {
@@ -1112,6 +1115,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+				})
+			})
+
+			r.Route("/api/design-drafts", func(r chi.Router) {
+				r.Get("/", h.ListDesignDrafts)
+				r.Post("/", h.CreateDesignDraft)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", h.RenameDesignDraft)
+					r.Delete("/", h.DeleteDesignDraft)
+					r.Post("/preview-token", h.CreateDesignDraftPreviewToken)
 				})
 			})
 

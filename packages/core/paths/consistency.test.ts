@@ -24,6 +24,7 @@ describe("paths.workspace() shape", () => {
         "agents",
         "newAgent",
         "chat",
+        "designs",
         "squads",
         "inbox",
         "myIssues",

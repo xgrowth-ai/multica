@@ -733,7 +733,6 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return
 	}
-
 	// Invalidate membership cache for all workspace members before deletion.
 	// After CASCADE deletes the member rows, cache entries become harmless
 	// orphans (downstream lookups for the deleted workspace will fail), but
@@ -770,9 +769,35 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
-
 	if _, err := qtx.LockWorkspaceForDelete(r.Context(), requester.WorkspaceID); err != nil {
 		slog.Warn("lock workspace for delete failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		return
+	}
+	var designDraftKeys []string
+	rows, err := tx.Query(r.Context(), `SELECT manifest FROM design_draft WHERE workspace_id=$1`, requester.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		return
+	}
+	for rows.Next() {
+		var raw []byte
+		if rows.Scan(&raw) == nil {
+			var files []designDraftFile
+			if json.Unmarshal(raw, &files) == nil {
+				for _, file := range files {
+					designDraftKeys = append(designDraftKeys, file.StorageKey)
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		return
+	}
+	rows.Close()
+	if _, err := tx.Exec(r.Context(), `DELETE FROM design_draft WHERE workspace_id=$1`, requester.WorkspaceID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
 		return
 	}
@@ -801,6 +826,9 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("commit workspace delete failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
 		return
+	}
+	if h.Storage != nil && len(designDraftKeys) > 0 {
+		h.Storage.DeleteKeys(r.Context(), designDraftKeys)
 	}
 
 	slog.Info("workspace deleted", append(logger.RequestAttrs(r), "workspace_id", workspaceID)...)

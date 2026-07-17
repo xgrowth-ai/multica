@@ -180,6 +180,7 @@ export interface AppConfigResponse {
   workspace_creation_disabled?: boolean;
   feature_flags?: Record<string, boolean>;
   server_version?: string;
+  design_preview_enabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +331,7 @@ export const AppConfigSchema = z.object({
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
   server_version: OptionalStringSchema,
+  design_preview_enabled: BooleanWithDefaultSchema(false),
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
@@ -341,7 +343,35 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_app_url: "",
   workspace_creation_disabled: false,
   feature_flags: {},
+  design_preview_enabled: false,
 };
+
+export const DesignDraftFileSchema = z.object({
+  path: z.string(),
+  content_type: z.string(),
+  size: z.number().nonnegative(),
+});
+
+export const DesignDraftSchema = z.object({
+  id: z.string(), workspace_id: z.string(), name: z.string(), entry_path: z.string(),
+  files: z.array(DesignDraftFileSchema).default([]), total_size: z.number().nonnegative(),
+  created_by: z.string(), created_by_name: z.string().default(""), can_manage: z.boolean().default(false),
+  created_at: z.string(), updated_at: z.string(), preview_enabled: z.boolean().default(false),
+});
+
+export const ListDesignDraftsResponseSchema = z.object({
+  design_drafts: z.array(DesignDraftSchema).default([]),
+  preview_enabled: z.boolean().default(false),
+});
+
+export const DesignDraftPreviewTokenSchema = z.object({ preview_url: z.string().url(), expires_at: z.string() });
+
+export const EMPTY_DESIGN_DRAFT = {
+  id: "", workspace_id: "", name: "", entry_path: "", files: [], total_size: 0,
+  created_by: "", created_by_name: "", can_manage: false, created_at: "", updated_at: "", preview_enabled: false,
+};
+
+export const EMPTY_DESIGN_DRAFT_PREVIEW_TOKEN = { preview_url: "", expires_at: "" };
 
 // Preference keys may grow over time, so keep both the key and value spaces
 // forward-compatible while still rejecting non-string persisted data.

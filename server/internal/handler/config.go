@@ -55,7 +55,8 @@ type AppConfig struct {
 	// Only emitted on self-hosted deployments — omitted on the managed cloud,
 	// which is continuously deployed so its users can't act on the version —
 	// and empty for dev builds that aren't stamped via -X main.version.
-	ServerVersion string `json:"server_version,omitempty"`
+	ServerVersion        string `json:"server_version,omitempty"`
+	DesignPreviewEnabled bool   `json:"design_preview_enabled"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -67,6 +68,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		AllowSignup:               os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID:            os.Getenv("GOOGLE_CLIENT_ID"),
 		WorkspaceCreationDisabled: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+		DesignPreviewEnabled:      h.Storage != nil && h.cfg.DesignPreviewPublicURL != "" && h.cfg.DesignPreviewSecret != "",
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()

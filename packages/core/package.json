@@ -72,6 +72,7 @@
     "./projects/queries": "./projects/queries.ts",
     "./projects/mutations": "./projects/mutations.ts",
     "./projects/config": "./projects/config.ts",
+    "./design-drafts": "./design-drafts/index.ts",
     "./labels": "./labels/index.ts",
     "./labels/queries": "./labels/queries.ts",
     "./labels/mutations": "./labels/mutations.ts",
