@@ -20,11 +20,12 @@ import (
 )
 
 const (
-	maxDesignDraftFiles    = 200
-	maxDesignDraftFileSize = 5 << 20
-	maxDesignDraftTotal    = 20 << 20
-	maxDesignDraftRequest  = 22 << 20
-	designPreviewTTL       = 10 * time.Minute
+	maxDesignDraftFiles     = 200
+	maxDesignDraftFileSize  = 5 << 20
+	maxDesignDraftTotal     = 20 << 20
+	maxDesignDraftRequest   = 22 << 20
+	designPreviewTTL        = 10 * time.Minute
+	designPreviewCORSOrigin = "*"
 )
 
 type designDraftFile struct {
@@ -460,6 +461,9 @@ func (h *Handler) ServeDesignDraftPreview(w http.ResponseWriter, r *http.Request
 		ancestors = strings.Join(allowedAncestors, " ")
 	}
 	w.Header().Set("Content-Security-Policy", designDraftPreviewCSP(ancestors))
+	// A sandboxed preview without allow-same-origin has an opaque `null` origin.
+	// Permit its scripts to fetch other files protected by the same signed token.
+	w.Header().Set("Access-Control-Allow-Origin", designPreviewCORSOrigin)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Cache-Control", "private, no-store")

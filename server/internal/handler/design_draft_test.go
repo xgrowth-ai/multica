@@ -68,3 +68,10 @@ func TestDesignDraftPreviewCSPAllowsExternalHTTPSResources(t *testing.T) {
 		t.Fatalf("CSP still blocks external connections: %s", csp)
 	}
 }
+
+func TestDesignDraftPreviewAllowsOpaqueSandboxOrigin(t *testing.T) {
+	t.Parallel()
+	if designPreviewCORSOrigin != "*" {
+		t.Fatalf("designPreviewCORSOrigin = %q, want *", designPreviewCORSOrigin)
+	}
+}
