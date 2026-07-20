@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FolderOpen, MoreHorizontal, PanelsTopLeft, Upload } from "lucide-react";
+import { File as FileIcon, FileCode2, FileImage, FolderOpen, MoreHorizontal, PanelsTopLeft, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -18,10 +18,18 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../i18n";
+import { designDraftFileUrl } from "./preview-url";
 
 const allowed = new Set(["html", "htm", "js", "mjs", "css", "json", "txt", "md", "svg", "png", "jpg", "jpeg", "gif", "webp", "ico", "woff", "woff2"]);
 
 type SelectedFile = { file: File; path: string };
+type PreviewState = { draft: DesignDraft; tokenUrl: string; selectedPath: string };
+
+function fileIcon(path: string) {
+  if (/\.(?:png|jpe?g|gif|webp|svg|ico)$/i.test(path)) return FileImage;
+  if (/\.(?:html?|js|mjs|css|json|md|txt)$/i.test(path)) return FileCode2;
+  return FileIcon;
+}
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -48,7 +56,7 @@ export function DesignsPage() {
   const [files, setFiles] = useState<SelectedFile[]>([]);
   const [name, setName] = useState("");
   const [entryPath, setEntryPath] = useState("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewState, setPreviewState] = useState<PreviewState | null>(null);
   const htmlFiles = useMemo(() => files.filter((item) => /\.html?$/i.test(item.path)), [files]);
 
   const chooseFolder = () => fileInput.current?.click();
@@ -90,7 +98,10 @@ export function DesignsPage() {
   };
 
   const openPreview = async (draft: DesignDraft) => {
-    try { const token = await preview.mutateAsync(draft.id); setPreviewUrl(token.preview_url); }
+    try {
+      const token = await preview.mutateAsync(draft.id);
+      setPreviewState({ draft, tokenUrl: token.preview_url, selectedPath: draft.entry_path });
+    }
     catch { toast.error(t(($) => $.preview_failed)); }
   };
 
@@ -133,7 +144,45 @@ export function DesignsPage() {
         )}
       </div>
       <Dialog open={uploadOpen} onOpenChange={setUploadOpen}><DialogContent><DialogHeader><DialogTitle>{t(($) => $.upload_title)}</DialogTitle><DialogDescription>{t(($) => $.upload_description)}</DialogDescription></DialogHeader><div className="space-y-4"><div><label className="mb-1 block text-sm font-medium">{t(($) => $.name)}</label><Input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} /></div><div><label className="mb-1 block text-sm font-medium">{t(($) => $.entry)}</label><select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={entryPath} onChange={(e) => setEntryPath(e.target.value)}>{htmlFiles.map((item) => <option key={item.path} value={item.path}>{item.path}</option>)}</select></div><p className="text-xs text-muted-foreground">{files.length} {t(($) => $.files)} · {formatBytes(files.reduce((sum, item) => sum + item.file.size, 0))}</p></div><DialogFooter><Button variant="outline" onClick={() => setUploadOpen(false)}>{t(($) => $.cancel)}</Button><Button onClick={submit} disabled={!name.trim() || !entryPath || create.isPending}>{t(($) => $.upload)}</Button></DialogFooter></DialogContent></Dialog>
-      <Dialog open={previewUrl !== null} onOpenChange={(open) => { if (!open) setPreviewUrl(null); }}><DialogContent className="h-[90vh] max-w-[95vw] p-0 sm:max-w-[95vw]"><DialogHeader className="sr-only"><DialogTitle>{t(($) => $.preview)}</DialogTitle><DialogDescription>{t(($) => $.preview)}</DialogDescription></DialogHeader>{previewUrl && <iframe title={t(($) => $.preview)} src={previewUrl} sandbox="allow-scripts" className="h-full w-full rounded-lg bg-white" />}</DialogContent></Dialog>
+      <Dialog open={previewState !== null} onOpenChange={(open) => { if (!open) setPreviewState(null); }}>
+        <DialogContent className="flex h-[90vh] max-w-[95vw] overflow-hidden p-0 sm:max-w-[95vw]">
+          <DialogHeader className="sr-only"><DialogTitle>{t(($) => $.preview)}</DialogTitle><DialogDescription>{t(($) => $.preview)}</DialogDescription></DialogHeader>
+          {previewState && <>
+            <aside className="flex w-72 shrink-0 flex-col border-r bg-muted/20">
+              <div className="border-b px-4 py-3 pr-10">
+                <p className="truncate text-sm font-semibold" title={previewState.draft.name}>{previewState.draft.name}</p>
+                <p className="text-xs text-muted-foreground">{previewState.draft.files.length} {t(($) => $.files)}</p>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                {[...previewState.draft.files].sort((a, b) => a.path.localeCompare(b.path)).map((item) => {
+                  const Icon = fileIcon(item.path);
+                  const selected = item.path === previewState.selectedPath;
+                  return <button
+                    key={item.path}
+                    type="button"
+                    title={item.path}
+                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${selected ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"}`}
+                    onClick={() => setPreviewState((current) => current ? { ...current, selectedPath: item.path } : current)}
+                  >
+                    <Icon className="size-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{item.path}</span>
+                    {item.path === previewState.draft.entry_path && <span className="shrink-0 text-[10px] uppercase text-muted-foreground">{t(($) => $.entry)}</span>}
+                  </button>;
+                })}
+              </div>
+            </aside>
+            <div className="min-w-0 flex-1 bg-white pt-10 sm:pt-0">
+              <iframe
+                key={previewState.selectedPath}
+                title={`${t(($) => $.preview)}: ${previewState.selectedPath}`}
+                src={designDraftFileUrl(previewState.tokenUrl, previewState.selectedPath)}
+                sandbox="allow-scripts"
+                className="h-full w-full bg-white"
+              />
+            </div>
+          </>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
