@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,5 +44,27 @@ func TestDesignPreviewTokenIsBoundAndExpires(t *testing.T) {
 	expired := h.signDesignPreview(designPreviewClaims{DraftID: "draft", Revision: "revision", Expires: time.Now().Add(-time.Second).Unix()})
 	if _, ok := h.verifyDesignPreview(expired); ok {
 		t.Fatal("verifyDesignPreview accepted an expired token")
+	}
+}
+
+func TestDesignDraftPreviewCSPAllowsExternalHTTPSResources(t *testing.T) {
+	t.Parallel()
+	csp := designDraftPreviewCSP("https://multica.example.test")
+	for _, directive := range []string{
+		"script-src 'self' 'unsafe-inline' https: blob:",
+		"style-src 'self' 'unsafe-inline' https:",
+		"img-src 'self' https: data: blob:",
+		"connect-src https: wss:",
+		"frame-ancestors https://multica.example.test",
+		"object-src 'none'",
+		"form-action 'none'",
+		"base-uri 'none'",
+	} {
+		if !strings.Contains(csp, directive) {
+			t.Errorf("CSP missing %q: %s", directive, csp)
+		}
+	}
+	if strings.Contains(csp, "connect-src 'none'") {
+		t.Fatalf("CSP still blocks external connections: %s", csp)
 	}
 }

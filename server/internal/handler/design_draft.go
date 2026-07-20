@@ -459,11 +459,15 @@ func (h *Handler) ServeDesignDraftPreview(w http.ResponseWriter, r *http.Request
 	if len(allowedAncestors) > 0 {
 		ancestors = strings.Join(allowedAncestors, " ")
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors "+ancestors)
+	w.Header().Set("Content-Security-Policy", designDraftPreviewCSP(ancestors))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Content-Type", selected.ContentType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", selected.Size))
 	_, _ = io.Copy(w, reader)
+}
+
+func designDraftPreviewCSP(ancestors string) string {
+	return "default-src 'none'; script-src 'self' 'unsafe-inline' https: blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; font-src 'self' https: data:; worker-src 'self' https: blob:; connect-src https: wss:; media-src https:; frame-src https:; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors " + ancestors
 }
