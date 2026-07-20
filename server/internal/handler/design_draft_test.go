@@ -51,7 +51,7 @@ func TestDesignDraftPreviewCSPAllowsExternalHTTPSResources(t *testing.T) {
 	t.Parallel()
 	csp := designDraftPreviewCSP("https://multica.example.test")
 	for _, directive := range []string{
-		"script-src 'self' 'unsafe-inline' https: blob:",
+		"script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:",
 		"style-src 'self' 'unsafe-inline' https:",
 		"img-src 'self' https: data: blob:",
 		"connect-src https: wss:",

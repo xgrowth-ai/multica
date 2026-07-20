@@ -473,5 +473,5 @@ func (h *Handler) ServeDesignDraftPreview(w http.ResponseWriter, r *http.Request
 }
 
 func designDraftPreviewCSP(ancestors string) string {
-	return "default-src 'none'; script-src 'self' 'unsafe-inline' https: blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; font-src 'self' https: data:; worker-src 'self' https: blob:; connect-src https: wss:; media-src https:; frame-src https:; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors " + ancestors
+	return "default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; style-src 'self' 'unsafe-inline' https:; img-src 'self' https: data: blob:; font-src 'self' https: data:; worker-src 'self' https: blob:; connect-src https: wss:; media-src https:; frame-src https:; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors " + ancestors
 }
