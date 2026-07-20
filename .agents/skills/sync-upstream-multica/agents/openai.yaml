@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sync Upstream Multica"
+  short_description: "Sync upstream changes and summarize updates"
+  default_prompt: "Use $sync-upstream-multica to sync Multica from upstream and report what changed."

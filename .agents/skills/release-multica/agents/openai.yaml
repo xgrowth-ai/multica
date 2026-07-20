@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release Multica"
+  short_description: "Deploy and operate Multica safely on Tencent Cloud"
+  default_prompt: "Use $release-multica to deploy or upgrade the Multica production instance safely."
