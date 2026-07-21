@@ -49,6 +49,44 @@ Host bindings:
 - Redis may be unset for this single-node deployment; realtime then uses the in-memory hub and auth rate limiting is disabled.
 - `/docs` may log connection refusal to port 4000 because the self-host stack does not include the separate docs app. Treat it as a docs-only issue, not main-app failure.
 
+## Build and load release images
+
+This fork does not publish to GHCR (see the skill's **Fork release model**). Production images `ghcr.io/multica-ai/multica-{backend,web}:<tag>` are built on the operator workstation and streamed into the host Docker. The host is `linux/amd64`; the operator workstation is typically Apple Silicon, so build for the target platform explicitly.
+
+Run from the repo root, for the target tag:
+
+```bash
+tag=vX.Y.Z
+commit=$(git rev-parse --short HEAD)
+date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+docker buildx build --platform linux/amd64 --load -f Dockerfile \
+  --build-arg VERSION="$tag" --build-arg COMMIT="$commit" --build-arg DATE="$date" \
+  -t "ghcr.io/multica-ai/multica-backend:${tag}" .
+
+docker buildx build --platform linux/amd64 --load -f Dockerfile.web \
+  --build-arg NEXT_PUBLIC_APP_VERSION="$tag" \
+  -t "ghcr.io/multica-ai/multica-web:${tag}" .
+
+docker image save --platform=linux/amd64 \
+  "ghcr.io/multica-ai/multica-backend:${tag}" \
+  "ghcr.io/multica-ai/multica-web:${tag}" |
+  gzip -1 |
+  ssh -i ~/.ssh/mira.pem deploy@124.222.33.239 'gunzip | docker load'
+```
+
+Verify on the host before flipping the tag:
+
+```bash
+ssh -i ~/.ssh/mira.pem deploy@124.222.33.239 'docker images | grep "multica-ai.*<tag>"'
+```
+
+If the host already has both images for the tag (re-deploy, retry), skip building. The backend build is fast (Go); the web build is the long pole (Next.js under amd64 emulation, ~10–20 min on Apple Silicon). Building on the host itself is not recommended — the box is too small (2 vCPU, 3.6 GiB) for the Next.js build.
+
+## Migration reconciliation reference
+
+`schema_migrations(version text, applied_at timestamptz)` holds one row per applied migration, keyed by the full filename stem. A migration renamed/renumbered between releases will re-run on upgrade and fail when its objects already exist. Check first whether the rename was content-identical, confirm the objects exist, then insert the new stems as applied — see the skill's **Migration reconciliation** section. Worked example: the v0.4.10 release reconciled `197_design_draft`→`202_design_draft` and `198_design_draft_workspace_index`→`203_design_draft_workspace_index`.
+
 ## PostgreSQL backup
 
 Create the directory once with restrictive ownership:
@@ -72,7 +110,7 @@ Record the dump path in the release report. Do not claim disaster recovery is es
 
 ## Trusted GHCR relay fallback
 
-Use this only when direct pulls stall. Run from the trusted operator workstation:
+Secondary path. Use only when the target tag is actually published to the `multica-ai` GHCR namespace — fork tags past `v0.4.6` usually are not, so prefer **Build and load release images** above. When a remote `docker pull` stalls, run from the trusted operator workstation:
 
 ```bash
 tag=vX.Y.Z
