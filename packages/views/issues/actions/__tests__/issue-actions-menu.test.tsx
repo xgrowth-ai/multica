@@ -75,6 +75,22 @@ vi.mock("@multica/core/issues/mutations", () => ({
   useUpdateIssue: () => ({ mutate: vi.fn() }),
 }));
 
+vi.mock("@multica/core/labels", () => ({
+  labelListOptions: () => ({
+    queryKey: ["labels", "ws-1"],
+    queryFn: () => Promise.resolve([
+      { id: "label-1", name: "Bug", color: "#ef4444" },
+    ]),
+  }),
+  issueLabelsOptions: () => ({
+    queryKey: ["labels", "ws-1", "issues", "issue-1"],
+    queryFn: () => Promise.resolve([]),
+  }),
+  useAttachLabel: () => ({ mutate: vi.fn() }),
+  useDetachLabel: () => ({ mutate: vi.fn() }),
+  useCreateLabel: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 vi.mock("@multica/core/paths", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/paths")>(
     "@multica/core/paths",
@@ -164,6 +180,7 @@ describe("IssueActionsDropdown", () => {
     expect(await screen.findByText("Status")).toBeInTheDocument();
     expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
+    expect(screen.getByText("Set labels")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
     expect(screen.getByText("Relations")).toBeInTheDocument();
@@ -271,5 +288,25 @@ describe("IssueActionsContextMenu", () => {
 
     expect(await screen.findByText("Status")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
+  });
+
+  it("opens the shared label picker from Set labels", async () => {
+    render(
+      wrap(
+        <IssueContextMenuProvider>
+          <IssueActionsContextMenu issue={mockIssue}>
+            <div data-testid="row">Row</div>
+          </IssueActionsContextMenu>
+        </IssueContextMenuProvider>,
+      ),
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("row"));
+    fireEvent.click(await screen.findByText("Set labels"));
+
+    expect(
+      await screen.findByPlaceholderText("Find or create a label…"),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Bug")).toBeInTheDocument();
   });
 });

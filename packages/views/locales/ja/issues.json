@@ -499,6 +499,7 @@
     "status": "ステータス",
     "priority": "優先度",
     "assignee": "担当者",
+    "set_labels": "ラベルを設定",
     "start_date": "開始日",
     "start_today": "今日",
     "start_tomorrow": "明日",

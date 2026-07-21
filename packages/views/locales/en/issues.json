@@ -524,6 +524,7 @@
     "status": "Status",
     "priority": "Priority",
     "assignee": "Assignee",
+    "set_labels": "Set labels",
     "start_date": "Start date",
     "start_today": "Today",
     "start_tomorrow": "Tomorrow",

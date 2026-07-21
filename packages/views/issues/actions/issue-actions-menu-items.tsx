@@ -14,6 +14,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  Tag,
   Trash2,
   Unlink,
   UserMinus,
@@ -86,6 +87,8 @@ interface IssueActionsMenuItemsProps {
    *  Decoupled this way so the same item can drive both the dropdown
    *  (3-dot button) and the context menu (right-click) wrappers. */
   onOpenAssignee: () => void;
+  /** Called when the user clicks the Labels menu item. */
+  onOpenLabels: () => void;
   /** If set, navigate here after the issue is deleted (used by the detail page). */
   onDeletedNavigateTo?: string;
 }
@@ -95,6 +98,7 @@ export function IssueActionsMenuItems({
   actions,
   primitives: P,
   onOpenAssignee,
+  onOpenLabels,
   onDeletedNavigateTo,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
@@ -193,6 +197,11 @@ export function IssueActionsMenuItems({
       <P.Item onClick={onOpenAssignee}>
         <UserMinus className="h-3.5 w-3.5" />
         {t(($) => $.actions.assignee)}
+      </P.Item>
+
+      <P.Item onClick={onOpenLabels}>
+        <Tag className="h-3.5 w-3.5" />
+        {t(($) => $.actions.set_labels)}
       </P.Item>
 
       {/* Start date */}

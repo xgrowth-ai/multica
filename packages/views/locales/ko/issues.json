@@ -499,6 +499,7 @@
     "status": "상태",
     "priority": "우선순위",
     "assignee": "담당자",
+    "set_labels": "라벨 설정",
     "start_date": "시작일",
     "start_today": "오늘",
     "start_tomorrow": "내일",

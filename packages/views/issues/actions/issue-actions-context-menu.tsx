@@ -21,7 +21,7 @@ import {
   IssueActionsMenuItems,
   contextPrimitives,
 } from "./issue-actions-menu-items";
-import { AssigneePicker } from "../components/pickers";
+import { AssigneePicker, LabelPicker } from "../components/pickers";
 
 /**
  * One shared context menu per surface instead of one Base UI ContextMenu
@@ -108,6 +108,7 @@ function IssueContextMenuSingleton({
 }) {
   const actions = useIssueActions(issue);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [labelsOpen, setLabelsOpen] = useState(false);
 
   // Point-sized virtual anchor at the right-click position — replaces the
   // cursor anchor Base UI's own trigger would have registered.
@@ -133,6 +134,7 @@ function IssueContextMenuSingleton({
             actions={actions}
             primitives={contextPrimitives}
             onOpenAssignee={() => setAssigneeOpen(true)}
+            onOpenLabels={() => setLabelsOpen(true)}
           />
         </ContextMenuContent>
       </ContextMenu>
@@ -159,6 +161,26 @@ function IssueContextMenuSingleton({
             />
           }
           trigger={<span />}
+          align="start"
+        />
+      )}
+      {labelsOpen && (
+        <LabelPicker
+          issueId={issue.id}
+          open={labelsOpen}
+          onOpenChange={setLabelsOpen}
+          triggerRender={
+            <span
+              aria-hidden
+              className="pointer-events-none fixed"
+              style={{
+                left: position.x,
+                top: position.y,
+                width: 0,
+                height: 0,
+              }}
+            />
+          }
           align="start"
         />
       )}

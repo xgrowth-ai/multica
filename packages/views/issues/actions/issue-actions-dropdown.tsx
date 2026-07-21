@@ -12,7 +12,7 @@ import {
   IssueActionsMenuItems,
   dropdownPrimitives,
 } from "./issue-actions-menu-items";
-import { AssigneePicker } from "../components/pickers";
+import { AssigneePicker, LabelPicker } from "../components/pickers";
 
 interface IssueActionsDropdownProps {
   issue: Issue;
@@ -31,6 +31,7 @@ export function IssueActionsDropdown({
 }: IssueActionsDropdownProps) {
   const actions = useIssueActions(issue);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [labelsOpen, setLabelsOpen] = useState(false);
 
   // The outer `relative inline-flex` is the picker's anchor box: the
   // absolute, pointer-events-none span inside `triggerRender` fills it, so
@@ -46,6 +47,7 @@ export function IssueActionsDropdown({
             actions={actions}
             primitives={dropdownPrimitives}
             onOpenAssignee={() => setAssigneeOpen(true)}
+            onOpenLabels={() => setLabelsOpen(true)}
             onDeletedNavigateTo={onDeletedNavigateTo}
           />
         </DropdownMenuContent>
@@ -67,6 +69,20 @@ export function IssueActionsDropdown({
             />
           }
           trigger={<span />}
+          align={align}
+        />
+      )}
+      {labelsOpen && (
+        <LabelPicker
+          issueId={issue.id}
+          open={labelsOpen}
+          onOpenChange={setLabelsOpen}
+          triggerRender={
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0"
+            />
+          }
           align={align}
         />
       )}
