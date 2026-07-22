@@ -41,6 +41,9 @@
 //     and on success writes through InstallationService + auto-binds
 //     the installer via InstallerBinder so §2.1 "scan to bind, you're
 //     done" holds end-to-end)
+//  13. AutomationNotifier (subscribes to autopilot:run_done and pushes a
+//      result card to a fixed chat via the App API; autopilot runs have
+//      no chat_session so the Patcher never sees them)
 //
 // Architectural boundaries (frozen from Elon's 二审, MUL-2671 §4.8):
 //

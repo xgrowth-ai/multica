@@ -462,7 +462,15 @@ func (p *Patcher) installationCredentials(inst Installation) (InstallationCreden
 	if p.credentials == nil {
 		return InstallationCredentials{}, errors.New("lark patcher: credentials resolver missing")
 	}
-	secret, err := p.credentials.DecryptAppSecret(inst)
+	return buildInstallationCredentials(p.credentials, inst)
+}
+
+// buildInstallationCredentials decrypts the installation's app_secret and
+// assembles the per-call InstallationCredentials every APIClient send needs.
+// Shared by the Patcher, the OutcomeReplier, and the AutomationNotifier so the
+// region/tenant-key handling stays in one place.
+func buildInstallationCredentials(resolver CredentialsResolver, inst Installation) (InstallationCredentials, error) {
+	secret, err := resolver.DecryptAppSecret(inst)
 	if err != nil {
 		return InstallationCredentials{}, fmt.Errorf("decrypt app_secret: %w", err)
 	}

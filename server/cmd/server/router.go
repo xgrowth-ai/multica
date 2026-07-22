@@ -329,6 +329,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				patcher := lark.NewPatcher(cs, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
 
+				// AutomationNotifier: push autopilot run results to a fixed
+				// Feishu chat via the same App API as the Patcher. Autopilot
+				// runs have no chat_session so they never reach the Patcher;
+				// this subscriber fills that gap. Inert unless the configured
+				// app is installed and the APIClient is the real client.
+				automationNotifier := lark.NewAutomationNotifier(lark.AutomationNotifierConfig{
+					APIClient:   larkClient,
+					Credentials: installSvc,
+					Queries:     cs,
+					Logger:      slog.Default(),
+				})
+				automationNotifier.Register(bus)
+
 				// Typing indicator: shows a "processing" reaction on the user's
 				// message while the agent is working, then removes it before the
 				// reply is sent. Best-effort; failures are logged only.
