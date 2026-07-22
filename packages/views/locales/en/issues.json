@@ -1,4 +1,8 @@
 {
+  "detail_drawer": {
+    "title": "Issue details",
+    "description": "View and edit issue details without leaving the current page."
+  },
   "page": {
     "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "Workspace",

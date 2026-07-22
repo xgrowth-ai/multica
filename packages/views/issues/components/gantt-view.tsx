@@ -16,7 +16,7 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
-import { AppLink } from "../../navigation";
+import { IssueDetailLink } from "./issue-detail-link";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { StatusIcon } from "./status-icon";
@@ -365,7 +365,8 @@ function ScheduledRow({
         style={{ height: ROW_HEIGHT }}
       >
         {/* Sticky label cell */}
-        <AppLink
+        <IssueDetailLink
+          issueId={issue.id}
           href={p.issueDetail(issue.id)}
           className="sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-sm min-w-0"
           style={{ width: LEFT_COL_WIDTH }}
@@ -385,7 +386,7 @@ function ScheduledRow({
               enableHoverCard
             />
           )}
-        </AppLink>
+        </IssueDetailLink>
         {/* Timeline track */}
         <div
           className="relative shrink-0"
@@ -395,7 +396,8 @@ function ScheduledRow({
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <AppLink
+                  <IssueDetailLink
+                    issueId={issue.id}
                     href={p.issueDetail(issue.id)}
                     className={cn(
                       "absolute top-1/2 -translate-y-1/2 transition-opacity hover:opacity-90",
@@ -412,7 +414,7 @@ function ScheduledRow({
                         {issue.title}
                       </span>
                     )}
-                  </AppLink>
+                  </IssueDetailLink>
                 }
               />
               <TooltipContent side="top">

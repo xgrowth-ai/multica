@@ -50,7 +50,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { StatusHeading } from "./status-heading";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
-import { AppLink } from "../../navigation";
+import { IssueDetailLink } from "./issue-detail-link";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { VirtuosoSeed } from "../../common/virtuoso-seed";
@@ -1451,13 +1451,14 @@ function DraggableSwimLane({
           <DeferredTooltip
             content={t(($) => $.swimlane.open_parent)}
             trigger={
-              <AppLink
+              <IssueDetailLink
+                issueId={lane.parentIssue.id}
                 href={paths.issueDetail(lane.parentIssue.id)}
                 aria-label={t(($) => $.swimlane.open_parent)}
                 className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <Pencil className="size-3" />
-              </AppLink>
+              </IssueDetailLink>
             }
           />
         )}

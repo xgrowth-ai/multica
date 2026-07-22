@@ -9,6 +9,7 @@ import { DashboardGuard } from "./dashboard-guard";
 import { NavigationProgress } from "./navigation-progress";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
+import { IssueDetailDrawer } from "../issues/components";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -42,6 +43,7 @@ export function DashboardLayout({
           <NavigationProgress />
           {children}
           <ModalRegistry />
+          <IssueDetailDrawer />
           <SourceBackfillModal />
           {extra}
         </SidebarInset>

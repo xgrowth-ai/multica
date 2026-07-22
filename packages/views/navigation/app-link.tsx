@@ -5,6 +5,8 @@ import { useNavigation } from "./context";
 
 interface AppLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
   href: string;
+  /** Return false to handle an unmodified, same-tab click without routing. */
+  onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => boolean | void;
   /**
    * Desktop only: label for the tab created when the click opens a new tab
    * (modifier-click or `target="_blank"`). Falls back to the path.
@@ -14,7 +16,7 @@ interface AppLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
 
 export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
   function AppLink(
-    { href, children, onClick, onMouseEnter, onFocus, target, newTabTitle, ...props },
+    { href, children, onClick, onMouseEnter, onFocus, target, newTabTitle, onNavigate, ...props },
     ref,
   ) {
     const { push, openInNewTab, prefetch } = useNavigation();
@@ -45,6 +47,7 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
       // (close popover, clear selection, blur the trigger) lands in the
       // same tick rather than getting deferred behind the transition.
       onClick?.(e);
+      if (onNavigate?.(e) === false) return;
       push(href);
     };
 

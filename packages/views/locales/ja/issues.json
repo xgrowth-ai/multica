@@ -1,4 +1,8 @@
 {
+  "detail_drawer": {
+    "title": "イシューの詳細",
+    "description": "現在のページを離れずにイシューの詳細を表示、編集します。"
+  },
   "page": {
     "breadcrumb_title": "イシュー",
     "breadcrumb_workspace_fallback": "ワークスペース",

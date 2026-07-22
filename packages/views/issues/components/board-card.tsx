@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, memo } from "react";
-import { AppLink } from "../../navigation";
+import { IssueDetailLink } from "./issue-detail-link";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -357,7 +357,8 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         {...listeners}
         className={`group/card ${isDragging ? "opacity-30" : ""}`}
       >
-        <AppLink
+        <IssueDetailLink
+          issueId={issue.id}
           href={p.issueDetail(issue.id)}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
         >
@@ -367,7 +368,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
             childProgress={childProgress}
             project={project}
           />
-        </AppLink>
+        </IssueDetailLink>
       </div>
     </IssueActionsContextMenu>
   );

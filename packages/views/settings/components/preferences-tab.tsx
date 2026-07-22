@@ -20,6 +20,7 @@ import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
 import {
   useCommentComposerStore,
+  useIssueDetailOpenStore,
   useIssueLinkStore,
 } from "@multica/core/issues/stores";
 import { api } from "@multica/core/api";
@@ -167,10 +168,36 @@ export function PreferencesTab() {
 
           <StickyCommentBarRow />
 
+          <IssueDetailDrawerRow />
+
           <IssueLinkNewTabRow />
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>
+  );
+}
+
+function IssueDetailDrawerRow() {
+  const { t } = useT("settings");
+  const openInDrawer = useIssueDetailOpenStore((s) => s.openInDrawer);
+  const setOpenInDrawer = useIssueDetailOpenStore((s) => s.setOpenInDrawer);
+
+  return (
+    <SettingsRow
+      label={t(($) => $.preferences.issue_detail_drawer.title)}
+      description={t(($) => $.preferences.issue_detail_drawer.hint)}
+    >
+      <Switch
+        checked={openInDrawer}
+        onCheckedChange={(checked) => {
+          setOpenInDrawer(checked === true);
+          toast.success(t(($) => $.auto_save.toast_saved), {
+            id: "settings-auto-save",
+          });
+        }}
+        aria-label={t(($) => $.preferences.issue_detail_drawer.title)}
+      />
+    </SettingsRow>
   );
 }
 

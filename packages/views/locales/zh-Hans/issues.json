@@ -1,4 +1,8 @@
 {
+  "detail_drawer": {
+    "title": "Issue 详情",
+    "description": "无需离开当前页面即可查看和编辑 issue 详情。"
+  },
   "page": {
     "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "工作区",

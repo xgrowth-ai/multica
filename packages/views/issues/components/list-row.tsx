@@ -4,7 +4,7 @@ import { memo, type Ref } from "react";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AppLink } from "../../navigation";
+import { IssueDetailLink } from "./issue-detail-link";
 import type { Issue, Project,
   IssueProperty,
 } from "@multica/core/types";
@@ -102,7 +102,8 @@ function ListRowContent({
             }`}
           />
         </div>
-        <AppLink
+        <IssueDetailLink
+          issueId={issue.id}
           href={p.issueDetail(issue.id)}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
         >
@@ -171,7 +172,7 @@ function ListRowContent({
               enableHoverCard
             />
           )}
-        </AppLink>
+        </IssueDetailLink>
       </div>
     </IssueActionsContextMenu>
   );

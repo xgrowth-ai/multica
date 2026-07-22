@@ -31,6 +31,10 @@
       "title": "Sticky comment bar",
       "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
     },
+    "issue_detail_drawer": {
+      "title": "Open issue details in side drawer",
+      "hint": "Open issues from boards and lists in a right-side drawer without leaving your current view."
+    },
     "issue_link_new_tab": {
       "title": "Open issue links in new tab",
       "hint": "Issue links in descriptions, comments, and chat open in a new tab instead of navigating in place."

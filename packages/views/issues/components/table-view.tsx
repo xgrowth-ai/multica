@@ -82,6 +82,7 @@ import {
   type TableSystemColumnKey,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { useIssueDetailOpenStore } from "@multica/core/issues/stores";
 import { propertyListOptions } from "@multica/core/properties";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { buildActorNameResolver, useActorName } from "@multica/core/workspace/hooks";
@@ -1976,7 +1977,11 @@ export function TableView({
   );
 
   const openIssue = useCallback(
-    (issueId: string) => navigation.push(paths.issueDetail(issueId)),
+    (issueId: string) => {
+      const state = useIssueDetailOpenStore.getState();
+      if (state.openInDrawer) state.openDrawer(issueId);
+      else navigation.push(paths.issueDetail(issueId));
+    },
     [navigation, paths],
   );
 

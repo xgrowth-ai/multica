@@ -1,4 +1,8 @@
 {
+  "detail_drawer": {
+    "title": "이슈 상세",
+    "description": "현재 페이지를 벗어나지 않고 이슈 상세를 확인하고 편집합니다."
+  },
   "page": {
     "breadcrumb_title": "이슈",
     "breadcrumb_workspace_fallback": "워크스페이스",
