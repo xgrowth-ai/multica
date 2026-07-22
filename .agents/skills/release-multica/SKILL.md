@@ -65,7 +65,16 @@ When blocked:
    ```
 
 4. Leave old stems in place and record the reconciliation in the release report.
-5. Re-run the `deploy` phase; never re-run the migration DDL manually.
+5. Resume the `deploy` phase with the exact target acknowledgement; never
+   re-run the migration DDL manually:
+
+   ```bash
+   MULTICA_RELEASE_RECONCILED_TARGET=vX.Y.Z \
+     .agents/skills/release-multica/scripts/release-production.sh deploy vX.Y.Z
+   ```
+
+   The script still requires byte-identical rename candidates and verifies
+   both the old and new stems in production before it permits deployment.
 
 ## Diagnose production
 

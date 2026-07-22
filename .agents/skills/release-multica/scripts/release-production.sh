@@ -27,6 +27,11 @@ Stages:
 If no tag is supplied, HEAD must point at an exact stable tag. This script never
 creates a release tag. A release request authorizes publishing an existing tag,
 but creating a new tag still requires explicit user confirmation.
+
+After manually reconciling content-identical migration renames, resume with
+MULTICA_RELEASE_RECONCILED_TARGET set to the exact target tag. The migration
+pre-flight still verifies the rename hashes and both old/new schema_migrations
+rows before it permits deployment.
 EOF
 }
 
@@ -234,11 +239,13 @@ build_and_load_images() (
 )
 
 migration_preflight() {
-  local current_tag="$1"
-  run_remote "bash -s" -- "$current_tag" "$TAG" <<'REMOTE'
+  local current_tag="$1" reconciled_target
+  reconciled_target="${MULTICA_RELEASE_RECONCILED_TARGET:-}"
+  run_remote "bash -s" -- "$current_tag" "$TAG" "$reconciled_target" <<'REMOTE'
 set -euo pipefail
 current_tag="$1"
 target_tag="$2"
+reconciled_target="$3"
 work_dir=$(mktemp -d /tmp/multica-migrations.XXXXXX)
 trap 'rm -rf -- "$work_dir"' EXIT
 current_image=$(docker inspect -f '{{.Image}}' multica-backend-1)
@@ -286,6 +293,49 @@ if [[ -s "$work_dir/missing" || -s "$work_dir/changed" ]]; then
   if [[ -s "$work_dir/changed" ]]; then
     echo "migration_files_changed_in_place:" >&2
     cut -d'|' -f1 "$work_dir/changed" | sed 's/^/  /' >&2
+  fi
+
+  # A reconciliation acknowledgement is deliberately narrow: it applies to
+  # one exact target tag, never accepts changed-in-place SQL, requires every
+  # missing file to have exactly one byte-identical target candidate, and
+  # checks that both the old and new up-migration stems are already recorded.
+  # This makes the resume path auditable without creating a generic skip flag.
+  if [[ "$reconciled_target" == "$target_tag" && ! -s "$work_dir/changed" ]]; then
+    reconciliation_ok=true
+    checked_up_stems=0
+    while IFS= read -r old_name; do
+      old_hash=$(awk -F'|' -v name="$old_name" '$1==name {print $2}' "$work_dir/current")
+      mapfile -t candidates < <(awk -F'|' -v hash="$old_hash" '$2==hash {print $1}' "$work_dir/target")
+      if [[ ${#candidates[@]} -ne 1 ]]; then
+        reconciliation_ok=false
+        echo "reconciliation candidate count for $old_name is ${#candidates[@]}, want 1" >&2
+        continue
+      fi
+      if [[ "$old_name" == *.up.sql ]]; then
+        old_stem="${old_name%.up.sql}"
+        new_stem="${candidates[0]%.up.sql}"
+        if [[ ! "$old_stem" =~ ^[0-9]+_[a-z0-9_]+$ || ! "$new_stem" =~ ^[0-9]+_[a-z0-9_]+$ ]]; then
+          reconciliation_ok=false
+          echo "invalid migration stem in reconciliation: $old_stem -> $new_stem" >&2
+          continue
+        fi
+        for stem in "$old_stem" "$new_stem"; do
+          applied=$(docker exec multica-postgres-1 psql -U multica -d multica -X -Atc \
+            "SELECT 1 FROM schema_migrations WHERE version = '$stem'")
+          if [[ "$applied" != "1" ]]; then
+            reconciliation_ok=false
+            echo "schema_migrations is missing reconciled stem: $stem" >&2
+          fi
+        done
+        checked_up_stems=$((checked_up_stems + 1))
+      fi
+    done < "$work_dir/missing"
+
+    if [[ "$reconciliation_ok" == true && "$checked_up_stems" -gt 0 ]]; then
+      echo "MIGRATION_PREFLIGHT_RECONCILED current=$current_tag target=$target_tag checked_up_stems=$checked_up_stems"
+      exit 0
+    fi
+    echo "migration reconciliation acknowledgement could not be verified" >&2
   fi
   exit 2
 fi
@@ -366,20 +416,46 @@ fi
 echo "release_started=$started"
 docker compose up -d
 
+# Compose should recreate services when the image reference changes, but check
+# the observable container config instead of trusting that convergence. If an
+# older Compose invocation leaves either application container on the previous
+# tag, force-recreate only backend/frontend; PostgreSQL stays untouched.
+expected_backend="ghcr.io/multica-ai/multica-backend:${target_tag}"
+expected_frontend="ghcr.io/multica-ai/multica-web:${target_tag}"
+actual_backend=$(docker inspect -f '{{.Config.Image}}' multica-backend-1 2>/dev/null || true)
+actual_frontend=$(docker inspect -f '{{.Config.Image}}' multica-frontend-1 2>/dev/null || true)
+if [[ "$actual_backend" != "$expected_backend" || "$actual_frontend" != "$expected_frontend" ]]; then
+  echo "compose_convergence=retry backend=$actual_backend frontend=$actual_frontend"
+  docker compose up -d --no-deps --force-recreate backend frontend
+fi
+
+actual_backend=$(docker inspect -f '{{.Config.Image}}' multica-backend-1)
+actual_frontend=$(docker inspect -f '{{.Config.Image}}' multica-frontend-1)
+[[ "$actual_backend" == "$expected_backend" ]] || {
+  echo "backend container image did not converge: $actual_backend" >&2
+  exit 1
+}
+[[ "$actual_frontend" == "$expected_frontend" ]] || {
+  echo "frontend container image did not converge: $actual_frontend" >&2
+  exit 1
+}
+
 for _ in $(seq 1 60); do
-  if health=$(curl -fsS http://127.0.0.1:8080/healthz 2>/dev/null); then
-    if grep -Eq '"db"[[:space:]]*:[[:space:]]*"ok"' <<<"$health" &&
-      grep -Eq '"migrations"[[:space:]]*:[[:space:]]*"ok"' <<<"$health"; then
+  health=$(curl -fsS http://127.0.0.1:8080/healthz 2>/dev/null || true)
+  frontend_code=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ 2>/dev/null || true)
+  if grep -Eq '"db"[[:space:]]*:[[:space:]]*"ok"' <<<"$health" &&
+    grep -Eq '"migrations"[[:space:]]*:[[:space:]]*"ok"' <<<"$health" &&
+    [[ "$frontend_code" == "200" ]]; then
       echo "backend_health=$health"
+      echo "frontend_health=http_$frontend_code"
       exit 0
-    fi
   fi
   sleep 2
 done
 
-echo "backend health did not become ready" >&2
+echo "application health did not become ready" >&2
 docker compose ps >&2
-docker compose logs --tail=200 backend >&2
+docker compose logs --tail=200 backend frontend >&2
 exit 1
 REMOTE
 

@@ -85,7 +85,8 @@ Important behavior:
 - Builds come from `git archive <tag-commit>`, not the working tree, and use `--progress=plain` without a TTY.
 - Host images are authoritative. When both exact-tag images already exist, `prepare` skips the build and transfer.
 - Migration pre-flight permits new files, but blocks a missing previously shipped filename or an in-place content change.
-- `deploy` validates the PostgreSQL archive with `pg_restore --list`, backs up `.env`, proves that only `MULTICA_IMAGE_TAG` changed, preserves `root:deploy 640`, and waits for database and migrations health.
+- After a verified content-identical rename is reconciled in production, resume with `MULTICA_RELEASE_RECONCILED_TARGET=<exact-target-tag> ... deploy <exact-target-tag>`. The script verifies the rename hashes and both old/new migration stems; this is not a general skip switch.
+- `deploy` validates the PostgreSQL archive with `pg_restore --list`, backs up `.env`, proves that only `MULTICA_IMAGE_TAG` changed, preserves `root:deploy 640`, verifies both application containers converged to the exact tag, and waits for backend plus frontend health.
 - `verify` is strict. It checks exact images, service health, loopback bindings, public HTTP/HTTPS, `/api/config`, `/ws`, TLS lifetime, logs, notifier state, and optional provider configuration.
 - Re-running `all` for the already-deployed tag performs verification without another backup or restart.
 
