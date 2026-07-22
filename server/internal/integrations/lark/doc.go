@@ -44,6 +44,8 @@
 //  13. AutomationNotifier (subscribes to autopilot:run_done and pushes a
 //      result card to a fixed chat via the App API; autopilot runs have
 //      no chat_session so the Patcher never sees them)
+//  14. AgentTaskNotifier (subscribes to task:completed and pushes complete
+//      issue-task output plus PR links to the same operations chat)
 //
 // Architectural boundaries (frozen from Elon's 二审, MUL-2671 §4.8):
 //

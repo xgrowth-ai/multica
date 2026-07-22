@@ -73,9 +73,9 @@ func newAutomationNotifier(t *testing.T, client APIClient, q AutomationQueries) 
 	})
 }
 
-// uuidString formats 16 bytes as the canonical UUID string the notifier parses
+// uuidBytesString formats 16 bytes as the canonical UUID string the notifier parses
 // back via pgtype.UUID.Scan. Avoids depending on pgtype's Valuer impl.
-func uuidString(b [16]byte) string {
+func uuidBytesString(b [16]byte) string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
@@ -95,7 +95,7 @@ func TestAutomationNotifier_CompletedWithIssue_SendsGreenCard(t *testing.T) {
 	n.handle(events.Event{
 		Type: protocol.EventAutopilotRunDone,
 		Payload: map[string]any{
-			"run_id": uuidString(runID.Bytes),
+			"run_id": uuidBytesString(runID.Bytes),
 			"status": "completed",
 		},
 	})
@@ -136,7 +136,7 @@ func TestAutomationNotifier_Failed_IncludesFailureReason(t *testing.T) {
 	n.handle(events.Event{
 		Type: protocol.EventAutopilotRunDone,
 		Payload: map[string]any{
-			"run_id": uuidString(runID.Bytes),
+			"run_id": uuidBytesString(runID.Bytes),
 			"status": "failed",
 		},
 	})
@@ -170,7 +170,7 @@ func TestAutomationNotifier_RunOnly_IncludesOutput(t *testing.T) {
 	n.handle(events.Event{
 		Type: protocol.EventAutopilotRunDone,
 		Payload: map[string]any{
-			"run_id": uuidString(runID.Bytes),
+			"run_id": uuidBytesString(runID.Bytes),
 			"status": "completed",
 		},
 	})
@@ -190,7 +190,7 @@ func TestAutomationNotifier_Skipped_DoesNotSend(t *testing.T) {
 
 	n.handle(events.Event{
 		Type:    protocol.EventAutopilotRunDone,
-		Payload: map[string]any{"run_id": uuidString([16]byte{2}), "status": "skipped"},
+		Payload: map[string]any{"run_id": uuidBytesString([16]byte{2}), "status": "skipped"},
 	})
 
 	if len(client.interactiveOut) != 0 {
@@ -209,7 +209,7 @@ func TestAutomationNotifier_UnknownApp_Silent(t *testing.T) {
 
 	n.handle(events.Event{
 		Type:    protocol.EventAutopilotRunDone,
-		Payload: map[string]any{"run_id": uuidString([16]byte{2}), "status": "completed"},
+		Payload: map[string]any{"run_id": uuidBytesString([16]byte{2}), "status": "completed"},
 	})
 
 	if len(client.interactiveOut) != 0 {
@@ -224,7 +224,7 @@ func TestAutomationNotifier_StubClient_DoesNotSend(t *testing.T) {
 
 	n.handle(events.Event{
 		Type:    protocol.EventAutopilotRunDone,
-		Payload: map[string]any{"run_id": uuidString([16]byte{2}), "status": "completed"},
+		Payload: map[string]any{"run_id": uuidBytesString([16]byte{2}), "status": "completed"},
 	})
 
 	if len(client.interactiveOut) != 0 {

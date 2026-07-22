@@ -342,6 +342,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 				automationNotifier.Register(bus)
 
+				// AgentTaskNotifier: ordinary issue tasks do not have an
+				// originating Feishu chat. Push their complete terminal output,
+				// including every known PR link, to the operations chat. Long
+				// results are split across cards instead of being truncated.
+				agentTaskNotifier := lark.NewAgentTaskNotifier(lark.AgentTaskNotifierConfig{
+					APIClient:   larkClient,
+					Credentials: installSvc,
+					Queries:     cs,
+					AppURL:      appURLFromEnv(),
+					Logger:      slog.Default(),
+				})
+				agentTaskNotifier.Register(bus)
+
 				// Typing indicator: shows a "processing" reaction on the user's
 				// message while the agent is working, then removes it before the
 				// reply is sent. Best-effort; failures are logged only.
