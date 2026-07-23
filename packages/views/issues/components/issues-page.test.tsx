@@ -136,13 +136,14 @@ vi.mock("@multica/core/api", () => ({
 
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
-  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "pending_verification", "done", "blocked", "cancelled"],
+  STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "pending_verification", "done", "blocked", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10" },
     in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10" },
+    pending_verification: { label: "Pending Verification", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
     done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10" },
     blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10" },
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -591,7 +592,7 @@ describe("IssuesPage (shared)", () => {
         group_by: "assignee",
         limit: 50,
         offset: 0,
-        statuses: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+        statuses: ["backlog", "todo", "in_progress", "in_review", "pending_verification", "done", "blocked", "cancelled"],
       }),
     );
     expect(mockListIssues).not.toHaveBeenCalled();

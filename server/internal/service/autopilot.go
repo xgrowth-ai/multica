@@ -973,7 +973,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 	wsID := util.UUIDToString(issue.WorkspaceID)
 
 	switch issue.Status {
-	case "done", "in_review":
+	case "done", "in_review", "pending_verification":
 		updatedRun, err := s.Queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{
 			ID: run.ID,
 		})

@@ -131,6 +131,8 @@ function issueIconColor(status: IssueStatus): string {
       return "text-warning";
     case "in_review":
       return "text-success";
+    case "pending_verification":
+      return "text-info";
     case "done":
       return "text-info";
     case "blocked":

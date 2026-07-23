@@ -49,7 +49,7 @@ Users on mobile have no answer to "how done is this project?". Real behavioral p
 
 ### 3. View mode switcher + Board view on detail's issues
 
-Web `project-detail.tsx:211-237, 311` exposes Board / List / Gantt selector for the issues section. Mobile `components/project/project-related-issues.tsx` hardcodes a **two-bucket "Open / Done" rollup** that doesn't exist on web — web groups by full `BOARD_STATUSES` (backlog/todo/in_progress/in_review/done/blocked).
+Web `project-detail.tsx:211-237, 311` exposes Board / List / Gantt selector for the issues section. Mobile `components/project/project-related-issues.tsx` hardcodes a **two-bucket "Open / Done" rollup** that doesn't exist on web — web groups by full `BOARD_STATUSES` (backlog/todo/in_progress/in_review/pending_verification/done/blocked).
 
 This is *silent semantic divergence*: a user expects "Open" on mobile and "Backlog + Todo + In Progress + In Review + Blocked" on web to be the same five categories. They are not.
 

@@ -96,6 +96,10 @@ function InReviewIcon() {
   return <ProgressCircle progress={0.75} />;
 }
 
+function PendingVerificationIcon() {
+  return <ProgressCircle progress={0.875} />;
+}
+
 function DoneIcon() {
   return (
     <ProgressCircle progress={1}>
@@ -148,6 +152,7 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
   todo: TodoIcon,
   in_progress: InProgressIcon,
   in_review: InReviewIcon,
+  pending_verification: PendingVerificationIcon,
   done: DoneIcon,
   blocked: BlockedIcon,
   cancelled: CancelledIcon,

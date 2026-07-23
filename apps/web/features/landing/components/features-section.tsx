@@ -137,7 +137,7 @@ const allAssignees: Assignee[] = [
   { type: "agent", id: "tina", name: "Tina-dev" },
 ];
 
-const statusCycle: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done"];
+const statusCycle: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "pending_verification", "done"];
 const priorityCycle: IssuePriority[] = ["none", "low", "medium", "high", "urgent"];
 
 function TeammatesVisual() {

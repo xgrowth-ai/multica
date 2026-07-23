@@ -18,6 +18,7 @@ export const BOARD_STATUSES: IssueStatus[] = [
   "todo",
   "in_progress",
   "in_review",
+  "pending_verification",
   "done",
   "blocked",
 ];
@@ -27,6 +28,7 @@ export const STATUS_LABEL: Record<IssueStatus, string> = {
   todo: "Todo",
   in_progress: "In Progress",
   in_review: "In Review",
+  pending_verification: "Pending Verification",
   done: "Done",
   blocked: "Blocked",
   cancelled: "Cancelled",

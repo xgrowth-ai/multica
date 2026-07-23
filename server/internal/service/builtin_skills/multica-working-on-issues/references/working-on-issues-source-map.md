@@ -115,17 +115,16 @@ and is hidden from the PR list.
 
 | Behavior | File:line | Drifted from |
 |---|---|---|
-| Create-time: agent-assigned, non-backlog issue enqueues immediately | `server/internal/handler/issue.go:2263-2264` | new citation |
-| `shouldEnqueueAgentTask` returns false for `backlog` (parking lot) | `server/internal/handler/issue.go:2644-2648` | new citation |
-| Backlog → non-backlog (not done/cancelled) enqueues on update | `server/internal/handler/issue.go:2537-2540` | `:2523` |
+| Create-time: agent-assigned issue in an executable status enqueues immediately | `server/internal/service/issue_trigger.go:90-108` (`WillEnqueueRun`) | updated for pending verification |
+| `WillEnqueueRun` returns false for `backlog` and `pending_verification` | `server/internal/service/issue_trigger.go:104-107` | updated for pending verification |
+| Backlog → executable status (not pending verification/done/cancelled) enqueues on update | `server/internal/service/issue_trigger.go:109-115` | updated for pending verification |
 | Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
 | Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go:66` (`notifyParentOfChildDone`; doc comment at `:15`; barrier gate at `:115`) | func def `:51` |
 | Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2652-2658` (`UpdateIssue`) and `:3170-3171` (`BatchUpdateIssues`); deletion still cancels at `:2863` (`DeleteIssue`) / `:3239` (`BatchDeleteIssues`) via `CancelTasksForIssue` (`server/internal/service/task.go:1229`) | new citation |
 
-Creation with `--status todo` (or any non-backlog status) on an agent-assigned
-issue fires the agent immediately; `--status backlog` parks it with the assignee
-set but no trigger. Promoting `backlog → todo` later fires it then (update path,
-line 2537).
+Creation with `--status todo` on an agent-assigned issue fires the agent
+immediately; `--status backlog` and `--status pending_verification` keep the
+assignee without starting a run. Promoting `backlog → todo` later fires it then.
 
 Moving an issue to `cancelled` used to call `CancelTasksForIssue` and stop every
 active task on it (the old #940 behavior). MUL-4465 removed that from both

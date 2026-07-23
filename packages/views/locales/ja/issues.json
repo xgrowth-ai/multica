@@ -15,6 +15,7 @@
     "todo": "未着手",
     "in_progress": "進行中",
     "in_review": "レビュー中",
+    "pending_verification": "検証待ち",
     "done": "完了",
     "blocked": "ブロック中",
     "cancelled": "キャンセル済み"

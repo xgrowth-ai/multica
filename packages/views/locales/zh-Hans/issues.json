@@ -15,6 +15,7 @@
     "todo": "待办",
     "in_progress": "进行中",
     "in_review": "审核中",
+    "pending_verification": "待验证",
     "done": "已完成",
     "blocked": "已阻塞",
     "cancelled": "已取消"

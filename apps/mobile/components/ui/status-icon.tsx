@@ -27,6 +27,7 @@ const STATUS_COLOR: Record<IssueStatus, string> = {
   todo: "#71717a",
   in_progress: "#eab308", // warning
   in_review: "#22c55e", // success
+  pending_verification: "#3b82f6", // info
   done: "#3b82f6", // info
   blocked: "#dc2626", // destructive
   cancelled: "#71717a",
@@ -145,6 +146,8 @@ export function StatusIcon({
         <ProgressCircle progress={0.5} color={color} />
       ) : status === "in_review" ? (
         <ProgressCircle progress={0.75} color={color} />
+      ) : status === "pending_verification" ? (
+        <ProgressCircle progress={0.875} color={color} />
       ) : status === "done" ? (
         <ProgressCircle progress={1} color={color}>
           <DoneCheck />

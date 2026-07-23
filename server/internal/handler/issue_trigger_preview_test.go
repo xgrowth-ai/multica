@@ -96,6 +96,16 @@ func TestPreviewIssueTrigger_CreateAgentVsBacklog(t *testing.T) {
 	if backlog.TotalCount != 0 {
 		t.Fatalf("backlog create: expected 0 triggers, got %+v", backlog)
 	}
+
+	pendingVerification := previewIssueTrigger(t, map[string]any{
+		"is_create":     true,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+		"status":        "pending_verification",
+	})
+	if pendingVerification.TotalCount != 0 {
+		t.Fatalf("pending verification create: expected 0 triggers, got %+v", pendingVerification)
+	}
 }
 
 // TestPreviewIssueTrigger_MemberNoTrigger verifies a member assignee never

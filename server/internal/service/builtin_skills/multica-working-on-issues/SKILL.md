@@ -182,6 +182,10 @@ on it. These are the contracts, not advice:
   the assigned agent then.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
+- **`pending_verification`** is the post-merge handoff to product or operations
+  for regression verification. It does not enqueue agent work and is not
+  equivalent to `done`; move the issue there after the implementation PR is
+  merged but before the shipped behavior has been verified.
 - **`done`** on a child issue posts a system comment on its parent. If a PR
   carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
   itself on merge — you do not also need to flip it manually.
@@ -193,8 +197,8 @@ on it. These are the contracts, not advice:
 ## Sub-issues: `todo` starts work now, `backlog` parks it
 
 On an agent-assigned issue, create status decides whether the assignee fires
-immediately. A non-backlog status (e.g. `todo`) enqueues the agent at create
-time; `backlog` sets the assignee without triggering.
+immediately. An executable status (e.g. `todo`) enqueues the agent at create
+time; `backlog` and `pending_verification` set the assignee without triggering.
 
 Parallel children — all start now:
 

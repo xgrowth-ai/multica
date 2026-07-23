@@ -19,16 +19,16 @@ type mention struct {
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
 
-
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
-	"backlog":     "Backlog",
-	"todo":        "Todo",
-	"in_progress": "In Progress",
-	"in_review":   "In Review",
-	"done":        "Done",
-	"blocked":     "Blocked",
-	"cancelled":   "Cancelled",
+	"backlog":              "Backlog",
+	"todo":                 "Todo",
+	"in_progress":          "In Progress",
+	"in_review":            "In Review",
+	"pending_verification": "Pending Verification",
+	"done":                 "Done",
+	"blocked":              "Blocked",
+	"cancelled":            "Cancelled",
 }
 
 // priorityLabels maps DB priority values to human-readable labels for notifications.
@@ -78,19 +78,19 @@ var parentBubbleNotifTypes = map[string]bool{
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
-	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
-	"priority_changed": "updates",
+	"issue_assigned":     "assignments",
+	"unassigned":         "assignments",
+	"assignee_changed":   "assignments",
+	"status_changed":     "status_changes",
+	"new_comment":        "comments",
+	"mentioned":          "comments",
+	"priority_changed":   "updates",
 	"start_date_changed": "updates",
-	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"due_date_changed":   "updates",
+	"task_completed":     "agent_activity",
+	"task_failed":        "agent_activity",
+	"agent_blocked":      "agent_activity",
+	"agent_completed":    "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -145,12 +145,14 @@ func loadUserPrefs(
 // status change lands on one of these, any pre-existing task_failed inbox
 // rows for the issue are archived so the inbox stays a fresh-signal surface.
 // `in_review` is included because in Multica's agent flow that's the most
-// reliable "work delivered" handoff — and a status flip back to in_progress
-// will simply produce new task_failed rows that surface normally.
+// reliable "work delivered" handoff. `pending_verification` is later in the
+// same delivered-work path. A status flip back to in_progress will simply
+// produce new task_failed rows that surface normally.
 var terminalStatusForTaskFailedDismiss = map[string]bool{
-	"in_review": true,
-	"done":      true,
-	"cancelled": true,
+	"in_review":            true,
+	"pending_verification": true,
+	"done":                 true,
+	"cancelled":            true,
 }
 
 // archiveStaleTaskFailedInbox archives all task_failed inbox rows for the
@@ -663,7 +665,8 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				issue.Title, "",
 				statusDetails)
 
-			// When the issue progresses past the failure (in_review / done /
+			// When the issue progresses past the failure (in_review /
+			// pending_verification / done /
 			// cancelled), retire any stale task_failed inbox rows so the
 			// inbox reflects the current state of the work, not its history.
 			// The activity log keeps the full failure history for audit.

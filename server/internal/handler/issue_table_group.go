@@ -170,7 +170,7 @@ func (group resolvedIssueTableGroup) sortExpression() string {
 func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) string {
 	switch group.kind {
 	case "status":
-		return "CASE group_value WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+		return "CASE group_value WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'pending_verification' THEN 4 WHEN 'done' THEN 5 WHEN 'blocked' THEN 6 WHEN 'cancelled' THEN 7 ELSE 8 END"
 	case "assignee":
 		return "CASE WHEN group_value = '__unassigned__' THEN 1 ELSE 0 END"
 	case "property":

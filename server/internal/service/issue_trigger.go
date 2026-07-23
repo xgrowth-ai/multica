@@ -68,8 +68,9 @@ func allowAllAgents(db.Agent) bool { return true }
 // omitted, four entry points inconsistent — see MUL-3375).
 //
 // It is intentionally a distinct predicate from the comment trigger
-// (assignee fallback comment routing): issue writes park on backlog while comments fire
-// in any status. The two only share leaf readiness checks (AgentReadiness,
+// (assignee fallback comment routing): issue writes park on backlog and
+// pending verification while comments fire in any status. The two only share
+// leaf readiness checks (AgentReadiness,
 // the pending-task dedup), not the top-level decision.
 //
 // The decision must equal the real enqueue conditions so preview never claims
@@ -99,13 +100,14 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	var source RunEnqueueSource
 	switch {
 	case in.IsCreate || in.AssigneeChanged:
-		// Backlog is the parking lot: assigning into backlog never starts a run.
-		if issue.Status == "backlog" {
+		// Backlog and pending verification do not represent executable agent
+		// work: one is parked before work starts, the other awaits human QA.
+		if issue.Status == "backlog" || issue.Status == "pending_verification" {
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceAssign
 	case in.StatusChanged && in.PrevStatus == "backlog" &&
-		issue.Status != "done" && issue.Status != "cancelled":
+		issue.Status != "pending_verification" && issue.Status != "done" && issue.Status != "cancelled":
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
 			return IssueRunTrigger{}, false
 		}

@@ -264,9 +264,10 @@ const MERGE_STATUS_RANK: Record<string, number> = {
   todo: 1,
   in_progress: 2,
   in_review: 3,
-  done: 4,
-  blocked: 5,
-  cancelled: 6,
+  pending_verification: 4,
+  done: 5,
+  blocked: 6,
+  cancelled: 7,
 };
 
 /**

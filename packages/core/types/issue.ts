@@ -6,6 +6,7 @@ export type IssueStatus =
   | "todo"
   | "in_progress"
   | "in_review"
+  | "pending_verification"
   | "done"
   | "blocked"
   | "cancelled";

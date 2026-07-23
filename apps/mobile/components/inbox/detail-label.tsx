@@ -30,6 +30,7 @@ const STATUS_LABEL: Record<IssueStatus, string> = {
   todo: "Todo",
   in_progress: "In Progress",
   in_review: "In Review",
+  pending_verification: "Pending Verification",
   done: "Done",
   blocked: "Blocked",
   cancelled: "Cancelled",

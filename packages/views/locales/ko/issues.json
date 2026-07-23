@@ -15,6 +15,7 @@
     "todo": "할 일",
     "in_progress": "진행 중",
     "in_review": "리뷰 중",
+    "pending_verification": "검증 대기",
     "done": "완료",
     "blocked": "막힘",
     "cancelled": "취소됨"
