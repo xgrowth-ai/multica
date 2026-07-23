@@ -240,7 +240,10 @@ build_and_load_images() (
 
 migration_preflight() {
   local current_tag="$1" reconciled_target
-  reconciled_target="${MULTICA_RELEASE_RECONCILED_TARGET:-}"
+  # SSH assembles command arguments into a remote shell command, which drops an
+  # empty trailing argument. Keep the third positional parameter present while
+  # using a value that can never equal a valid release tag.
+  reconciled_target="${MULTICA_RELEASE_RECONCILED_TARGET:-__not_reconciled__}"
   run_remote "bash -s" -- "$current_tag" "$TAG" "$reconciled_target" <<'REMOTE'
 set -euo pipefail
 current_tag="$1"
