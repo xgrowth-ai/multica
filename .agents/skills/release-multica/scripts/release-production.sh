@@ -374,7 +374,11 @@ if [[ "$current_tag" != "$target_tag" ]]; then
   env_backup="/opt/multica/backups/env-pre-${target_tag}-${stamp}"
 
   umask 027
-  docker compose exec -T postgres pg_dump -U multica -d multica -Fc > "$db_backup"
+  # The remote script itself arrives on stdin. Compose exec otherwise drains
+  # that stream while attaching stdin to pg_dump, consuming every command
+  # after this parsed if-block before Bash can execute it.
+  docker compose exec -T postgres pg_dump -U multica -d multica -Fc \
+    </dev/null > "$db_backup"
   chmod 640 "$db_backup"
   test -s "$db_backup"
   docker compose exec -T postgres pg_restore --list < "$db_backup" >/dev/null
