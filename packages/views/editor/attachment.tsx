@@ -521,12 +521,10 @@ function ImageAttachmentView({
     }
   };
 
-  // Click on figure opens the preview only in non-editor / non-uploading
-  // surfaces — inside the editor we let ProseMirror own the click for
-  // selection / cursor placement and route preview through the explicit
-  // Maximize button. The CSS rule `.image-figure[data-clickable="true"] {
-  // cursor: zoom-in }` keys off this same flag for the cursor affordance.
-  const clickable = !editable && !uploading;
+  // The image itself is always the primary preview affordance once uploading
+  // finishes, including inside the editor. Toolbar clicks stop propagation,
+  // so edit actions remain independent from opening the preview.
+  const clickable = !uploading;
 
   // DOM mirrors the original ReadonlyImage (span-only chain so it stays
   // valid HTML5 when rendered inside a markdown <p>). In editor surfaces

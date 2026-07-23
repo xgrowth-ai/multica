@@ -111,6 +111,11 @@ vi.mock("../i18n", () => ({
           download_failed: "",
           open_in_new_tab: "Open in new tab",
         },
+        mermaid: {
+          zoom_in: "Zoom in",
+          zoom_out: "Zoom out",
+          zoom_fit: "Fit to view",
+        },
       }),
   }),
 }));
@@ -172,6 +177,29 @@ describe("AttachmentPreviewModal — dispatch", () => {
     expect(img).toBeTruthy();
     expect(img?.getAttribute("src")).toBe(att.download_url);
     expect(img?.getAttribute("alt")).toBe(att.filename);
+  });
+
+  it("zooms an image and resets it to fit from the preview toolbar", () => {
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const img = screen.getByRole("img", { name: "shot.png" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(screen.getByText("125%")).toBeTruthy();
+    expect(img.getAttribute("style")).toContain("scale(1.25)");
+
+    fireEvent.click(screen.getByRole("button", { name: "Fit to view" }));
+    expect(screen.getByText("100%")).toBeTruthy();
+    expect(img.getAttribute("style")).toContain("scale(1)");
   });
 
   it("falls back to durable media URLs when a full attachment has no download_url", () => {

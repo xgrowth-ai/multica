@@ -42,7 +42,16 @@ import {
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "@multica/core/api";
-import { Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
+import {
+  Download,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Maximize2,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import type { Attachment } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -362,15 +371,7 @@ function PreviewContent({
 
   switch (kind) {
     case "image":
-      return (
-        <div className="flex h-full w-full items-center justify-center bg-black/40 p-4">
-          <img
-            src={state.mediaUrl}
-            alt={state.filename}
-            className="h-full w-full rounded-lg object-contain"
-          />
-        </div>
-      );
+      return <ImagePreviewContent state={state} />;
     case "pdf":
       return (
         <iframe
@@ -439,6 +440,93 @@ function PreviewContent({
         />
       );
   }
+}
+
+function ImagePreviewContent({ state }: { state: PreviewState }) {
+  const { t } = useT("editor");
+  const [loaded, setLoaded] = useState(false);
+  const [zoom, setZoom] = useState(1);
+
+  useEffect(() => {
+    setLoaded(false);
+    setZoom(1);
+  }, [state.mediaUrl]);
+
+  const zoomIn = () =>
+    setZoom((current) => Math.min(2, Number((current + 0.25).toFixed(2))));
+  const zoomOut = () =>
+    setZoom((current) => Math.max(0.5, Number((current - 0.25).toFixed(2))));
+
+  return (
+    <div className="relative h-full w-full bg-black/70">
+      <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-full border border-white/15 bg-background/90 p-1 text-foreground shadow-lg backdrop-blur-md">
+        <ImagePreviewToolbarButton
+          label={t(($) => $.mermaid.zoom_out)}
+          onClick={zoomOut}
+          disabled={zoom <= 0.5}
+        >
+          <ZoomOut className="size-3.5" />
+        </ImagePreviewToolbarButton>
+        <span className="min-w-10 select-none text-center text-[11px] font-semibold tabular-nums text-muted-foreground">
+          {Math.round(zoom * 100)}%
+        </span>
+        <ImagePreviewToolbarButton
+          label={t(($) => $.mermaid.zoom_in)}
+          onClick={zoomIn}
+          disabled={zoom >= 2}
+        >
+          <ZoomIn className="size-3.5" />
+        </ImagePreviewToolbarButton>
+        <ImagePreviewToolbarButton
+          label={t(($) => $.mermaid.zoom_fit)}
+          onClick={() => setZoom(1)}
+          disabled={zoom === 1}
+        >
+          <Maximize2 className="size-3.5" />
+        </ImagePreviewToolbarButton>
+      </div>
+
+      <div className="flex h-full w-full items-center justify-center overflow-auto px-6 py-16">
+        {!loaded && (
+          <Loader2 className="absolute size-6 animate-spin text-white/70" />
+        )}
+        <img
+          src={state.mediaUrl}
+          alt={state.filename}
+          className={`max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-[transform,opacity] duration-200 ${
+            loaded ? "opacity-100" : "opacity-0"
+          }`}
+          style={{ transform: `scale(${zoom})` }}
+          onLoad={() => setLoaded(true)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ImagePreviewToolbarButton({
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="grid size-8 place-items-center rounded-full transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-35"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -63,6 +63,11 @@ vi.mock("../i18n", () => ({
           open_in_new_tab: "Open in new tab",
           close: "Close",
         },
+        mermaid: {
+          zoom_in: "Zoom in",
+          zoom_out: "Zoom out",
+          zoom_fit: "Fit to view",
+        },
         file_card: { uploading: "Uploading {{filename}}" },
       }),
   }),
@@ -201,6 +206,17 @@ describe("Attachment — image dispatch", () => {
     const trash = screen.getByTitle("Delete");
     fireEvent.click(trash);
     expect(onDelete).toHaveBeenCalled();
+  });
+
+  it("opens the image preview when an editable image is clicked", () => {
+    const att = makeRecord();
+    renderWithQuery(
+      <Attachment attachment={{ kind: "record", attachment: att }} editable />,
+    );
+
+    fireEvent.click(screen.getByRole("img", { name: "shot.png" }));
+
+    expect(screen.getByRole("dialog", { name: "shot.png" })).toBeTruthy();
   });
 
   it("url-only image resolves to a record via context and uses its id for download", () => {
