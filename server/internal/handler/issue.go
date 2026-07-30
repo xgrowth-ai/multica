@@ -1891,9 +1891,10 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err == nil && len(attachments) > 0 {
+		mode := attachmentURLModeFromRequest(r)
 		resp.Attachments = make([]AttachmentResponse, len(attachments))
 		for i, a := range attachments {
-			resp.Attachments[i] = h.attachmentToResponse(a)
+			resp.Attachments[i] = h.attachmentToResponse(a, mode)
 		}
 	}
 
@@ -1912,9 +1913,19 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	ids := make([]pgtype.UUID, len(children))
+	for i, child := range children {
+		ids[i] = child.ID
+	}
+	labelsMap := h.labelsByIssue(r.Context(), issue.WorkspaceID, ids)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
+		labels := labelsMap[resp[i].ID]
+		if labels == nil {
+			labels = []LabelResponse{}
+		}
+		resp[i].Labels = &labels
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -1981,9 +1992,19 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+	ids := make([]pgtype.UUID, len(children))
+	for i, child := range children {
+		ids[i] = child.ID
+	}
+	labelsMap := h.labelsByIssue(r.Context(), wsUUID, ids)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
+		labels := labelsMap[resp[i].ID]
+		if labels == nil {
+			labels = []LabelResponse{}
+		}
+		resp[i].Labels = &labels
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -2563,13 +2584,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		analyticsAgentID = actualCreatorID
 	}
 
+	attachmentMode := attachmentURLModeFromRequest(r)
 	buildAttachmentResponses := func(atts []db.Attachment) []AttachmentResponse {
 		if len(atts) == 0 {
 			return nil
 		}
 		out := make([]AttachmentResponse, len(atts))
 		for i, a := range atts {
-			out[i] = h.attachmentToResponse(a)
+			out[i] = h.attachmentToResponse(a, attachmentMode)
 		}
 		return out
 	}

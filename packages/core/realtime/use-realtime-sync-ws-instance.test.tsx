@@ -8,6 +8,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
 import { defaultStorage } from "../platform/storage";
 import { issueKeys } from "../issues/queries";
+import { workspaceWorkingAgentsKeys } from "../agents/queries";
 import { workspaceKeys } from "../workspace/queries";
 import {
   markWorkspaceDeletePending,
@@ -18,6 +19,10 @@ import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 vi.mock("../platform/workspace-storage", () => ({
   getCurrentWsId: () => "ws-1",
   getCurrentSlug: () => "test-ws",
+  // Draft stores are now loaded transitively (storage-cleanup → register-all-drafts)
+  // so their persist wiring must resolve against this mock.
+  createWorkspaceAwareStorage: (adapter: unknown) => adapter,
+  registerForWorkspaceRehydration: () => {},
 }));
 
 vi.mock("../paths", () => ({
@@ -110,9 +115,10 @@ describe("useRealtimeSync — ws instance change", () => {
 
     // Should have called invalidateQueries for all workspace-scoped keys
     // (16 workspace-scoped [incl. property definitions] + 6 per-issue
-    // prefixes + 5 per-chat prefixes + 1 workspaceKeys.list() + 1
-    // cross-workspace inbox unread summary = 29 calls)
-    expect(invalidateSpy).toHaveBeenCalledTimes(29);
+    // prefixes + the workspace working-agents projection + 5 per-chat
+    // prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox unread
+    // summary = 30 calls)
+    expect(invalidateSpy).toHaveBeenCalledTimes(30);
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -224,6 +230,9 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
 
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.tableAll("ws-1"),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: workspaceWorkingAgentsKeys.all("ws-1"),
     });
   });
 

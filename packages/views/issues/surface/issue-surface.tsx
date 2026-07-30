@@ -53,6 +53,7 @@ export function IssueSurface({
   modes,
   surfaceKey,
   createDefaults,
+  search,
   renderHeader,
   renderEmpty,
   renderLoading,
@@ -98,6 +99,7 @@ export function IssueSurface({
         scope={scope}
         modes={modes}
         createDefaults={createDefaults}
+        search={search}
         renderHeader={renderHeader}
         renderEmpty={renderEmpty}
         renderLoading={renderLoading}
@@ -114,6 +116,7 @@ function IssueSurfaceContent({
   scope,
   modes,
   createDefaults,
+  search,
   renderHeader,
   renderEmpty,
   renderLoading,
@@ -127,6 +130,7 @@ function IssueSurfaceContent({
     scope,
     modes,
     createDefaults,
+    search,
   });
   const [tableLoadedIssues, setTableLoadedIssues] = useState<Issue[]>([]);
   const handleTableLoadedIssuesChange = useCallback((next: Issue[]) => {
@@ -207,11 +211,10 @@ function IssueSurfaceContent({
         ) : (
           <IssuesHeader
             scopedIssues={controller.surfaceIssues}
-            workingIssues={workingIssues}
             allowGantt={controller.allowGantt}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={
-              controller.viewMode !== "table"
+              controller.facetCountsExact
             }
             tableFacetCounts={controller.tableFacetCounts}
             onTableFacetChange={controller.setActiveTableFacet}
@@ -229,8 +232,8 @@ function IssueSurfaceContent({
           ) : (
             <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
               <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-              <p className="text-sm">{t(($) => $.detail.empty_issues_title)}</p>
-              <p className="text-xs">{t(($) => $.detail.empty_issues_hint)}</p>
+              <p className="text-body">{t(($) => $.detail.empty_issues_title)}</p>
+              <p className="text-caption">{t(($) => $.detail.empty_issues_hint)}</p>
               <Button
                 variant="outline"
                 size="sm"
@@ -260,6 +263,8 @@ function IssueSurfaceContent({
                 sort={controller.sort}
                 projectId={controller.projectId}
                 onCreateIssue={openCreateIssue}
+                statusPagination={controller.statusPagination}
+                groupBranches={controller.groupBranches}
               />
             )}
             {controller.viewMode === "list" && (
@@ -268,12 +273,10 @@ function IssueSurfaceContent({
                 visibleStatuses={controller.visibleStatuses}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
-                myIssuesScope={controller.loadMoreScope}
-                myIssuesFilter={controller.loadMoreFilter}
-                sort={controller.sort}
                 projectId={controller.projectId}
                 onMoveIssue={controller.moveIssue}
                 onCreateIssue={openCreateIssue}
+                statusPagination={controller.statusPagination!}
               />
             )}
             {controller.viewMode === "table" && (
@@ -305,8 +308,8 @@ function IssueSurfaceContent({
                 myIssuesFilter={controller.loadMoreFilter}
                 sort={controller.sort}
                 projectId={controller.projectId}
-                activityByIssueId={controller.activity.activityByIssueId}
                 onCreateIssue={openCreateIssue}
+                groupBranches={controller.groupBranches}
               />
             )}
           </div>
@@ -324,19 +327,16 @@ function IssueSurfaceContent({
   );
 }
 
+// Table is deliberately absent. It owns its own placeholders, drawn as rows
+// inside its real grid so the header, column widths and toolbar are up before
+// any data is — a surface-level stand-in would replace all of that with bars
+// of a different shape and then jump when the rows arrived.
 function IssueSurfaceSkeleton({ mode }: { mode: string }) {
-  if (mode === "list" || mode === "table") {
+  if (mode === "list") {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
-        {mode === "table" && <Skeleton className="mb-1 h-8 w-full" />}
-        {Array.from({ length: mode === "table" ? 8 : 4 }).map((_, i) => (
-          <Skeleton
-            key={i}
-            className={cn(
-              "w-full",
-              mode === "table" ? "h-9 rounded-sm" : "h-10 rounded-lg",
-            )}
-          />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full rounded-lg" />
         ))}
       </div>
     );
