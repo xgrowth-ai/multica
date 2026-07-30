@@ -783,12 +783,19 @@ describe("IssueDetail (shared)", () => {
     expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
   });
 
-  it("renders properties sidebar with all core rows plus set optional rows", async () => {
+  it("defaults the properties section closed and reveals its rows on demand", async () => {
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByText("Properties")).toBeInTheDocument();
+    const propertiesButton = await screen.findByRole("button", {
+      name: "Properties",
     });
+
+    expect(propertiesButton).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("project-picker")).not.toBeInTheDocument();
+
+    fireEvent.click(propertiesButton);
+
+    expect(propertiesButton).toHaveAttribute("aria-expanded", "true");
 
     // Core rows — always rendered regardless of whether the issue has a value.
     expect(screen.getByText("Status")).toBeInTheDocument();
@@ -823,6 +830,8 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => {
       expect(screen.getByText("Properties")).toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByRole("button", { name: "Properties" }));
 
     expect(screen.queryByText("Priority")).not.toBeInTheDocument();
     expect(screen.queryByText("Due date")).not.toBeInTheDocument();

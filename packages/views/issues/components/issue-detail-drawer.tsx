@@ -33,7 +33,7 @@ export function IssueDetailDrawer() {
     >
       <SheetContent
         side="right"
-        className="w-[min(1400px,calc(100vw-1.5rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
+        className="gap-0 overflow-hidden p-0 data-[side=right]:w-[min(2800px,calc(100vw-1.5rem))] data-[side=right]:sm:max-w-none"
       >
         <SheetTitle className="sr-only">
           {t(($) => $.detail_drawer.title)}
@@ -42,9 +42,6 @@ export function IssueDetailDrawer() {
           {t(($) => $.detail_drawer.description)}
         </SheetDescription>
         {issueId && (
-          // The wider drawer ships with the full property inspector open. A
-          // new layout key prevents the old collapsed-by-default layout from
-          // hiding it once, while later user resizing still persists.
           <IssueDetail
             key={issueId}
             issueId={issueId}
