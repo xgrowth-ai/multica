@@ -5,8 +5,11 @@ import type { Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
+import enProjects from "../../../locales/en/projects.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
+const TEST_RESOURCES = {
+  en: { common: enCommon, issues: enIssues, projects: enProjects },
+};
 
 // ---------------------------------------------------------------------------
 // Mocks — same pattern as the issue-detail test suite.
@@ -71,8 +74,22 @@ vi.mock("@multica/core/pins", () => ({
   useDeletePin: () => ({ mutate: vi.fn() }),
 }));
 
+const { updateIssueMock } = vi.hoisted(() => ({
+  updateIssueMock: vi.fn(),
+}));
+
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: vi.fn() }),
+  useUpdateIssue: () => ({ mutate: updateIssueMock }),
+}));
+
+vi.mock("@multica/core/projects/queries", () => ({
+  projectListOptions: () => ({
+    queryKey: ["projects", "ws-1", "list"],
+    queryFn: () =>
+      Promise.resolve([
+        { id: "project-1", title: "Project Alpha", icon: "🚀" },
+      ]),
+  }),
 }));
 
 vi.mock("@multica/core/labels", () => ({
@@ -173,6 +190,7 @@ beforeEach(() => {
   mockOpenModal.mockReset();
   openInNewTabMock.mockReset();
   getShareableUrlMock.mockClear();
+  updateIssueMock.mockReset();
   navState.hasOpenInNewTab = true;
 });
 
@@ -193,6 +211,7 @@ describe("IssueActionsDropdown", () => {
     expect(await screen.findByText("Status")).toBeInTheDocument();
     expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
+    expect(screen.getByText("Set project")).toBeInTheDocument();
     expect(screen.getByText("Set labels")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
@@ -380,5 +399,30 @@ describe("IssueActionsContextMenu", () => {
       await screen.findByPlaceholderText("Find or create a label…"),
     ).toBeInTheDocument();
     expect(await screen.findByText("Bug")).toBeInTheDocument();
+  });
+
+  it("opens the shared project picker and updates the issue", async () => {
+    render(
+      wrap(
+        <IssueContextMenuProvider>
+          <IssueActionsContextMenu issue={mockIssue}>
+            <div data-testid="row">Row</div>
+          </IssueActionsContextMenu>
+        </IssueContextMenuProvider>,
+      ),
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("row"));
+    fireEvent.click(await screen.findByText("Set project"));
+
+    expect(
+      await screen.findByPlaceholderText("Search projects..."),
+    ).toBeInTheDocument();
+    fireEvent.click(await screen.findByText("Project Alpha"));
+
+    expect(updateIssueMock).toHaveBeenCalledWith(
+      { id: "issue-1", project_id: "project-1" },
+      expect.any(Object),
+    );
   });
 });

@@ -534,6 +534,7 @@
     "status": "Status",
     "priority": "Priority",
     "assignee": "Assignee",
+    "set_project": "Set project",
     "set_labels": "Set labels",
     "start_date": "Start date",
     "start_today": "Today",

@@ -9,6 +9,7 @@ import {
   Calendar,
   CalendarClock,
   ExternalLink,
+  FolderKanban,
   FolderOpen,
   Link2,
   Network,
@@ -88,6 +89,8 @@ interface IssueActionsMenuItemsProps {
    *  Decoupled this way so the same item can drive both the dropdown
    *  (3-dot button) and the context menu (right-click) wrappers. */
   onOpenAssignee: () => void;
+  /** Called when the user clicks the Project menu item. */
+  onOpenProject: () => void;
   /** Called when the user clicks the Labels menu item. */
   onOpenLabels: () => void;
   /** If set, leave the page after the issue is deleted (used by the detail
@@ -102,6 +105,7 @@ export function IssueActionsMenuItems({
   actions,
   primitives: P,
   onOpenAssignee,
+  onOpenProject,
   onOpenLabels,
   onDeletedFallbackPath,
 }: IssueActionsMenuItemsProps) {
@@ -202,6 +206,11 @@ export function IssueActionsMenuItems({
       <P.Item onClick={onOpenAssignee}>
         <UserMinus className="h-3.5 w-3.5" />
         {t(($) => $.actions.assignee)}
+      </P.Item>
+
+      <P.Item onClick={onOpenProject}>
+        <FolderKanban className="h-3.5 w-3.5" />
+        {t(($) => $.actions.set_project)}
       </P.Item>
 
       <P.Item onClick={onOpenLabels}>

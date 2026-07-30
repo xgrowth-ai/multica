@@ -13,6 +13,7 @@ import {
   dropdownPrimitives,
 } from "./issue-actions-menu-items";
 import { AssigneePicker, LabelPicker } from "../components/pickers";
+import { ProjectPicker } from "../../projects/components/project-picker";
 
 interface IssueActionsDropdownProps {
   issue: Issue;
@@ -32,6 +33,7 @@ export function IssueActionsDropdown({
 }: IssueActionsDropdownProps) {
   const actions = useIssueActions(issue);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
 
   // The outer `relative inline-flex` is the picker's anchor box: the
@@ -48,6 +50,7 @@ export function IssueActionsDropdown({
             actions={actions}
             primitives={dropdownPrimitives}
             onOpenAssignee={() => setAssigneeOpen(true)}
+            onOpenProject={() => setProjectOpen(true)}
             onOpenLabels={() => setLabelsOpen(true)}
             onDeletedFallbackPath={onDeletedFallbackPath}
           />
@@ -78,6 +81,21 @@ export function IssueActionsDropdown({
           issueId={issue.id}
           open={labelsOpen}
           onOpenChange={setLabelsOpen}
+          triggerRender={
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0"
+            />
+          }
+          align={align}
+        />
+      )}
+      {projectOpen && (
+        <ProjectPicker
+          projectId={issue.project_id}
+          onUpdate={actions.updateField}
+          open={projectOpen}
+          onOpenChange={setProjectOpen}
           triggerRender={
             <span
               aria-hidden

@@ -22,6 +22,7 @@ import {
   contextPrimitives,
 } from "./issue-actions-menu-items";
 import { AssigneePicker, LabelPicker } from "../components/pickers";
+import { ProjectPicker } from "../../projects/components/project-picker";
 
 /**
  * One shared context menu per surface instead of one Base UI ContextMenu
@@ -108,6 +109,7 @@ function IssueContextMenuSingleton({
 }) {
   const actions = useIssueActions(issue);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
 
   // Point-sized virtual anchor at the right-click position — replaces the
@@ -134,6 +136,7 @@ function IssueContextMenuSingleton({
             actions={actions}
             primitives={contextPrimitives}
             onOpenAssignee={() => setAssigneeOpen(true)}
+            onOpenProject={() => setProjectOpen(true)}
             onOpenLabels={() => setLabelsOpen(true)}
           />
         </ContextMenuContent>
@@ -169,6 +172,27 @@ function IssueContextMenuSingleton({
           issueId={issue.id}
           open={labelsOpen}
           onOpenChange={setLabelsOpen}
+          triggerRender={
+            <span
+              aria-hidden
+              className="pointer-events-none fixed"
+              style={{
+                left: position.x,
+                top: position.y,
+                width: 0,
+                height: 0,
+              }}
+            />
+          }
+          align="start"
+        />
+      )}
+      {projectOpen && (
+        <ProjectPicker
+          projectId={issue.project_id}
+          onUpdate={actions.updateField}
+          open={projectOpen}
+          onOpenChange={setProjectOpen}
           triggerRender={
             <span
               aria-hidden

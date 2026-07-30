@@ -33,7 +33,7 @@ export function IssueDetailDrawer() {
     >
       <SheetContent
         side="right"
-        className="w-[min(1100px,calc(100vw-1rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
+        className="w-[min(1400px,calc(100vw-1.5rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
       >
         <SheetTitle className="sr-only">
           {t(($) => $.detail_drawer.title)}
@@ -42,12 +42,15 @@ export function IssueDetailDrawer() {
           {t(($) => $.detail_drawer.description)}
         </SheetDescription>
         {issueId && (
+          // The wider drawer ships with the full property inspector open. A
+          // new layout key prevents the old collapsed-by-default layout from
+          // hiding it once, while later user resizing still persists.
           <IssueDetail
             key={issueId}
             issueId={issueId}
             onDelete={closeDrawer}
-            defaultSidebarOpen={false}
-            layoutId="multica_issue_detail_drawer_layout"
+            defaultSidebarOpen
+            layoutId="multica_issue_detail_drawer_layout_v2"
           />
         )}
       </SheetContent>
