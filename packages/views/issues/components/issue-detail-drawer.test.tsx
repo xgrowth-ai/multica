@@ -53,12 +53,12 @@ describe("IssueDetailDrawer", () => {
     useIssueDetailOpenStore.setState({ drawerIssueId: "issue-1" });
   });
 
-  it("opens a twice-wider full-detail workspace with the property sidebar visible", () => {
+  it("opens a wide full-detail workspace with the property sidebar visible", () => {
     renderDrawer();
 
     const drawer = screen.getByRole("dialog");
     expect(drawer).toHaveClass(
-      "data-[side=right]:w-[min(2800px,calc(100vw-1.5rem))]",
+      "data-[side=right]:w-[min(1400px,calc(100vw-1.5rem))]",
       "data-[side=right]:sm:max-w-none",
     );
     expect(drawer).not.toHaveClass("data-[side=right]:w-3/4");

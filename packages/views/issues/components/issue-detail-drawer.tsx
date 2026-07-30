@@ -33,7 +33,7 @@ export function IssueDetailDrawer() {
     >
       <SheetContent
         side="right"
-        className="gap-0 overflow-hidden p-0 data-[side=right]:w-[min(2800px,calc(100vw-1.5rem))] data-[side=right]:sm:max-w-none"
+        className="gap-0 overflow-hidden p-0 data-[side=right]:w-[min(1400px,calc(100vw-1.5rem))] data-[side=right]:sm:max-w-none"
       >
         <SheetTitle className="sr-only">
           {t(($) => $.detail_drawer.title)}
