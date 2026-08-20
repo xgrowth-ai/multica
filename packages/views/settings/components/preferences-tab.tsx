@@ -21,7 +21,6 @@ import { useAuthStore } from "@multica/core/auth";
 import {
   useCommentComposerStore,
   useIssueDetailOpenStore,
-  useIssueLinkStore,
 } from "@multica/core/issues/stores";
 import { api } from "@multica/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
@@ -169,8 +168,6 @@ export function PreferencesTab() {
           <StickyCommentBarRow />
 
           <IssueDetailDrawerRow />
-
-          <IssueLinkNewTabRow />
         </SettingsCard>
       </SettingsSection>
     </SettingsTab>
@@ -220,30 +217,6 @@ function StickyCommentBarRow() {
           });
         }}
         aria-label={t(($) => $.preferences.sticky_comment_bar.title)}
-      />
-    </SettingsRow>
-  );
-}
-
-function IssueLinkNewTabRow() {
-  const { t } = useT("settings");
-  const openInNewTab = useIssueLinkStore((s) => s.openInNewTab);
-  const setOpenInNewTab = useIssueLinkStore((s) => s.setOpenInNewTab);
-
-  return (
-    <SettingsRow
-      label={t(($) => $.preferences.issue_link_new_tab.title)}
-      description={t(($) => $.preferences.issue_link_new_tab.hint)}
-    >
-      <Switch
-        checked={openInNewTab}
-        onCheckedChange={(checked) => {
-          setOpenInNewTab(checked === true);
-          toast.success(t(($) => $.auto_save.toast_saved), {
-            id: "settings-auto-save",
-          });
-        }}
-        aria-label={t(($) => $.preferences.issue_link_new_tab.title)}
       />
     </SettingsRow>
   );

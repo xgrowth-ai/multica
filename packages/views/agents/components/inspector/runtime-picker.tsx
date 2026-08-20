@@ -9,6 +9,7 @@ import {
   Lock,
   Monitor,
 } from "lucide-react";
+import { isRuntimeUsableForUser } from "@multica/core/runtimes";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
@@ -69,11 +70,11 @@ export function RuntimePicker({
 
   const selected = runtimes.find((r) => r.id === value) ?? null;
 
-  const isDisabled = (r: AgentRuntime): boolean => {
-    if (!currentUserId) return false;
-    if (r.owner_id === currentUserId) return false;
-    return r.visibility !== "public";
-  };
+  // Same predicate the create / duplicate / builder surfaces use, so a
+  // runtime this picker locks is exactly the one the API and CLI refuse
+  // (MUL-6126) — no workspace-role exception on either side.
+  const isDisabled = (r: AgentRuntime): boolean =>
+    !isRuntimeUsableForUser(r, currentUserId);
 
   // Machine grouping over the unfiltered list — resolves the selected
   // runtime's machine for the trigger label regardless of the Mine/All
@@ -444,7 +445,7 @@ export function RuntimePicker({
                     </span>
                   )}
                   {owner && machine.providerNames.length > 0 && (
-                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-faint-foreground">·</span>
                   )}
                   {machine.providerNames.length > 0 && (
                     <span className="flex shrink-0 items-center gap-1">
@@ -472,7 +473,7 @@ export function RuntimePicker({
               {containsSelection && (
                 <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-faint-foreground" />
             </button>
           );
         })

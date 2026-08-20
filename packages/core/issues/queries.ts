@@ -4,11 +4,11 @@ import {
   queryOptions,
   type QueryClient,
 } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import type {
-  GroupedIssuesResponse,
   Issue,
-  IssueStatus,
+  IssueAssigneeType,
+  IssueStatusCategory,
   IssueTableFacetsRequest,
   IssueTableGroupSpec,
   IssueTableGroupsRequest,
@@ -105,8 +105,16 @@ export const issueKeys = {
    * cache helpers don't have to special-case a non-bucketed shape under
    * the `my` prefix.
    */
-  projectGantt: (wsId: string, projectId: string) =>
-    [...issueKeys.projectGanttAll(wsId), projectId] as const,
+  projectGantt: (
+    wsId: string,
+    projectId: string,
+    assigneeTypes?: IssueAssigneeType[],
+  ) =>
+    [
+      ...issueKeys.projectGanttAll(wsId),
+      projectId,
+      assigneeTypes ?? null,
+    ] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
@@ -210,18 +218,24 @@ export const ISSUE_PAGE_SIZE = 50;
 export const ISSUE_FLAT_PAGE_SIZE = 100;
 
 /**
- * Statuses fetched and paginated into the list/board cache — every lifecycle
- * status, `cancelled` included. `cancelled` is a first-class default status
- * (MUL-4290), so it lives in the cache and renders like any other column;
- * there is no separate "visible board" subset. This constant governs
- * fetch/cache membership.
+ * CATEGORIES fetched and paginated into the list/board cache — all 7,
+ * `cancelled` included. `cancelled` is a first-class default (MUL-4290), so it
+ * lives in the cache and renders like any other column; there is no separate
+ * "visible board" subset. This constant governs fetch/cache membership.
+ *
+ * Keyed on category, not on status key (MUL-6243). A workspace can define any
+ * number of custom statuses, and bucketing by status would mean one more
+ * parallel `listIssues` request on every board load per status added. Bucketing
+ * by category keeps the fan-out fixed at 7 forever; a custom status appears in
+ * the column of the category it inherits, and the card's own badge is what
+ * shows which specific status it is on.
  */
-export const PAGINATED_STATUSES: readonly IssueStatus[] = ALL_STATUSES;
+export const PAGINATED_CATEGORIES: readonly IssueStatusCategory[] = ALL_STATUSES;
 
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
   const out = [];
-  for (const status of PAGINATED_STATUSES) {
+  for (const status of PAGINATED_CATEGORIES) {
     const bucket = data.byStatus[status];
     if (bucket) out.push(...bucket.issues);
   }
@@ -230,12 +244,12 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
 
 async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const responses = await Promise.all(
-    PAGINATED_STATUSES.map((status) =>
-      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
+    PAGINATED_CATEGORIES.map((category) =>
+      api.listIssues({ status_category: category, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
     ),
   );
   const byStatus: ListIssuesCache["byStatus"] = {};
-  PAGINATED_STATUSES.forEach((status, i) => {
+  PAGINATED_CATEGORIES.forEach((status: IssueStatusCategory, i: number) => {
     const res = responses[i]!;
     byStatus[status] = { issues: res.issues, total: res.total };
   });
@@ -484,165 +498,18 @@ export function issueTableFacetsOptions(
   });
 }
 
-export function issueFlatExportOptions(
-  wsId: string,
-  scope: string,
-  filter: IssueFlatFilter,
-  userId?: string,
-  sort?: IssueSortParam,
-) {
-  return queryOptions({
-    queryKey: issueKeys.flatExport(wsId, scope, filter, sort),
-    queryFn: () =>
-      scope === "all" && userId
-        ? fetchAllMyFlatIssues(userId, filter, sort)
-        : fetchAllFlatPages(filter, sort),
-    staleTime: 0,
-  });
-}
-
-async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
-  const [byAssignee, byCreator, byInvolves] = await Promise.all([
-    fetchFirstPages({ assignee_id: userId }, sort),
-    fetchFirstPages({ creator_id: userId }, sort),
-    fetchFirstPages({ involves_user_id: userId }, sort),
-  ]);
-  const byStatus: ListIssuesCache["byStatus"] = {};
-  for (const status of PAGINATED_STATUSES) {
-    const seen = new Set<string>();
-    const merged: Issue[] = [];
-    for (const cache of [byAssignee, byCreator, byInvolves]) {
-      const bucket = cache.byStatus[status];
-      if (!bucket) continue;
-      for (const issue of bucket.issues) {
-        if (seen.has(issue.id)) continue;
-        seen.add(issue.id);
-        merged.push(issue);
-      }
-    }
-    merged.sort((a, b) => compareIssuesForSort(a, b, sort));
-    byStatus[status] = { issues: merged, total: merged.length };
-  }
-  return { byStatus };
-}
-
-/**
- * Sibling of {@link fetchAllMyFirstPages} for the assignee-grouped board
- * view. Runs the three single-filter grouped queries in parallel and
- * merges groups by (assignee_type, assignee_id), deduping issues within
- * each group. Extra filters from the page (statuses, priorities, etc.)
- * pass through unchanged.
- */
-async function fetchAllMyAssigneeGroups(
-  userId: string,
-  filter: AssigneeGroupedIssuesFilter,
-  sort?: IssueSortParam,
-): Promise<GroupedIssuesResponse> {
-  const variants: AssigneeGroupedIssuesFilter[] = [
-    { ...filter, assignee_id: userId },
-    { ...filter, creator_id: userId },
-    { ...filter, involves_user_id: userId },
-  ];
-  const responses = await Promise.all(
-    variants.map((f) =>
-      api.listGroupedIssues({
-        group_by: "assignee",
-        limit: ISSUE_PAGE_SIZE,
-        offset: 0,
-        ...sort,
-        ...f,
-      }),
-    ),
-  );
-  const groupKey = (g: GroupedIssuesResponse["groups"][number]) =>
-    `${g.assignee_type ?? "_"}::${g.assignee_id ?? "_"}`;
-  const merged = new Map<string, GroupedIssuesResponse["groups"][number]>();
-  for (const res of responses) {
-    for (const group of res.groups) {
-      const key = groupKey(group);
-      const existing = merged.get(key);
-      if (!existing) {
-        merged.set(key, {
-          ...group,
-          issues: [...group.issues],
-          total: group.issues.length,
-        });
-        continue;
-      }
-      const seen = new Set(existing.issues.map((i) => i.id));
-      for (const issue of group.issues) {
-        if (seen.has(issue.id)) continue;
-        seen.add(issue.id);
-        existing.issues.push(issue);
-      }
-      existing.total = existing.issues.length;
-    }
-  }
-  const groups = [...merged.values()];
-  for (const group of groups) {
-    group.issues.sort((a, b) => compareIssuesForSort(a, b, sort));
-  }
-  return { groups };
-}
-
 /**
  * CACHE SHAPE NOTE: The raw cache stores {@link ListIssuesCache} (buckets keyed
  * by status, each with `{ issues, total }`), and `select` flattens it to
  * `Issue[]` for consumers. Mutations and ws-updaters must use
  * `setQueryData<ListIssuesCache>(...)` and preserve the byStatus shape.
  *
- * Fetches the first page of each paginated status in parallel. Use
- * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
+ * Fetches the first page of each paginated status in parallel.
  */
 export function issueListOptions(wsId: string, sort?: IssueSortParam) {
   return queryOptions({
     queryKey: issueKeys.listSorted(wsId, sort),
     queryFn: () => fetchFirstPages({}, sort),
-    select: flattenIssueBuckets,
-    placeholderData: keepPreviousData,
-  });
-}
-
-export function issueAssigneeGroupsOptions(
-  wsId: string,
-  filter: AssigneeGroupedIssuesFilter,
-  sort?: IssueSortParam,
-) {
-  return queryOptions<GroupedIssuesResponse>({
-    queryKey: issueKeys.assigneeGroups(wsId, { ...filter, ...sort }),
-    queryFn: () =>
-      api.listGroupedIssues({
-        group_by: "assignee",
-        limit: ISSUE_PAGE_SIZE,
-        offset: 0,
-        ...sort,
-        ...filter,
-      }),
-    placeholderData: keepPreviousData,
-  });
-}
-
-/**
- * Server-filtered issue list for the My Issues page.
- * Each scope gets its own cache entry so switching tabs is instant after first load.
- */
-export function myIssueListOptions(
-  wsId: string,
-  scope: string,
-  filter: MyIssuesFilter,
-  // Required when scope === "all" — the user id whose three relations
-  // (assignee, creator, agents+squads) we union over. For every other
-  // scope the filter object already carries the relevant id and userId
-  // is ignored.
-  userId?: string,
-  sort?: IssueSortParam,
-) {
-  return queryOptions({
-    queryKey: issueKeys.myListSorted(wsId, scope, filter, sort),
-    queryFn: () =>
-      scope === "all" && userId
-        ? fetchAllMyFirstPages(userId, sort)
-        : fetchFirstPages(filter, sort),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,
   });
@@ -663,13 +530,17 @@ export const PROJECT_GANTT_PAGE_LIMIT = 500;
  */
 export const PROJECT_GANTT_MAX_ISSUES = 10_000;
 
-async function fetchProjectGanttIssues(projectId: string) {
+async function fetchProjectGanttIssues(
+  projectId: string,
+  assigneeTypes?: IssueAssigneeType[],
+) {
   const issues = [];
   let offset = 0;
   while (offset < PROJECT_GANTT_MAX_ISSUES) {
     const res = await api.listIssues({
       project_id: projectId,
       scheduled: true,
+      ...(assigneeTypes?.length ? { assignee_types: assigneeTypes } : {}),
       limit: PROJECT_GANTT_PAGE_LIMIT,
       offset,
     });
@@ -694,35 +565,16 @@ async function fetchProjectGanttIssues(projectId: string) {
  * `total` is reached so an oversized project can't silently lose bars past
  * the first page.
  */
-export function projectGanttIssuesOptions(wsId: string, projectId: string) {
-  return queryOptions({
-    queryKey: issueKeys.projectGantt(wsId, projectId),
-    queryFn: () => fetchProjectGanttIssues(projectId),
-  });
-}
-
-export function myIssueAssigneeGroupsOptions(
+export function projectGanttIssuesOptions(
   wsId: string,
-  scope: string,
-  filter: AssigneeGroupedIssuesFilter,
-  // See myIssueListOptions for the userId contract — only consulted when
-  // scope === "all", and powers the 3-fetch grouped union.
-  userId?: string,
-  sort?: IssueSortParam,
+  projectId: string,
+  // The page's assignee-type tab narrows the Gantt exactly like every
+  // other mode — same scope, same single mapping upstream.
+  assigneeTypes?: IssueAssigneeType[],
 ) {
-  return queryOptions<GroupedIssuesResponse>({
-    queryKey: issueKeys.myAssigneeGroups(wsId, scope, { ...filter, ...sort }),
-    queryFn: () =>
-      scope === "all" && userId
-        ? fetchAllMyAssigneeGroups(userId, filter, sort)
-        : api.listGroupedIssues({
-            group_by: "assignee",
-            limit: ISSUE_PAGE_SIZE,
-            offset: 0,
-            ...sort,
-            ...filter,
-          }),
-    placeholderData: keepPreviousData,
+  return queryOptions({
+    queryKey: issueKeys.projectGantt(wsId, projectId, assigneeTypes),
+    queryFn: () => fetchProjectGanttIssues(projectId, assigneeTypes),
   });
 }
 
@@ -736,11 +588,18 @@ export function issueDetailOptions(wsId: string, id: string) {
 /**
  * Resolve a bare issue identifier ("MUL-123") to its issue, or `null`.
  *
- * Backs the Linear-style autolink: the backend `q` search matches an
- * identifier on issue NUMBER only (prefix-agnostic — `MUL-123` and `TES-123`
- * both hit number 123), so the exact `identifier === value` filter here is
- * what enforces the workspace prefix. A non-existent or wrong-prefix
- * identifier resolves to `null` and renders as plain text.
+ * Backs the Linear-style autolink. This is an EXACT lookup, so it goes to
+ * `GET /api/issues/{identifier}` — the server parses `PREFIX-NUMBER`, checks
+ * the prefix against the workspace's own `issue_prefix`, and reads the issue
+ * through the unique `(workspace_id, number)` index. A non-existent or
+ * wrong-prefix identifier 404s, which maps to `null` here and renders as
+ * plain text — the same contract the previous implementation had.
+ *
+ * It deliberately does NOT use `/api/issues/search`: that endpoint runs the
+ * workspace-wide full-text query (title/description/comment `LIKE`, ranking,
+ * snippet subquery, `COUNT(*) OVER()`) which is orders of magnitude more
+ * expensive than a point read, and autolink resolution was the dominant
+ * caller of it (MUL-6268).
  *
  * Server state → TanStack Query; the key includes `wsId` and the identifier,
  * so identical identifiers across the app share one request. Caller gates
@@ -750,13 +609,15 @@ export function issueIdentifierOptions(wsId: string, identifier: string) {
   return queryOptions({
     queryKey: issueKeys.identifier(wsId, identifier),
     queryFn: async ({ signal }) => {
-      const res = await api.searchIssues({
-        q: identifier,
-        limit: 10,
-        include_closed: true,
-        signal,
-      });
-      return res.issues.find((i) => i.identifier === identifier) ?? null;
+      try {
+        return await api.getIssue(identifier, { signal });
+      } catch (err) {
+        // Unknown identifier / wrong workspace prefix → render as plain text.
+        // Any other failure (401/5xx/abort) must keep propagating so the query
+        // is retried or cancelled instead of being cached as "no such issue".
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }
     },
     // Identifier→issue mapping is effectively immutable; avoid refetch churn
     // when the same key renders across many comments/messages.

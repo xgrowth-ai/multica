@@ -7,7 +7,8 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
 import { projectListOptions } from "@multica/core/projects/queries";
-import type { Issue, IssueStatus } from "@multica/core/types";
+import type { Issue, IssueStatusCategory } from "@multica/core/types";
+import { issueStatusCategory } from "@multica/core/issues";
 import { dateOnlyToUTCDate } from "@multica/core/issues/date";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -23,7 +24,7 @@ import { StatusIcon } from "./status-icon";
 import { PriorityIcon } from "./priority-icon";
 import { IssueActionsContextMenu } from "../actions";
 import { sortIssues } from "../utils/sort";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
 // Date utilities — everything is UTC-day-aligned so a `due_date` ISO string
@@ -123,7 +124,7 @@ function GanttAxis({
   todayOffsetDays: number;
   width: number;
 }) {
-  const locale = typeof navigator !== "undefined" ? navigator.language : "en";
+  const locale = useLocale();
   const totalDays = daysBetween(range.start, range.end);
 
   const monthBlocks = useMemo(() => {
@@ -160,7 +161,7 @@ function GanttAxis({
         {monthBlocks.map((b, i) => (
           <div
             key={i}
-            className="absolute top-0 bottom-0 flex items-center px-2 text-caption font-medium text-foreground/80"
+            className="absolute top-0 bottom-0 flex items-center px-2 text-caption font-medium text-foreground"
             style={{ left: b.left, width: b.width }}
           >
             {b.width > 40 && <span className="truncate">{b.label}</span>}
@@ -195,7 +196,7 @@ function GanttAxis({
                   {zoom === "day" && (
                     <>
                       <span className="tabular-nums">{date.getUTCDate()}</span>
-                      <span className="text-micro opacity-70">
+                      <span className="text-micro">
                         {date.toLocaleDateString(locale, {
                           weekday: "short",
                           timeZone: "UTC",
@@ -290,7 +291,11 @@ function BackgroundLayer({
 // Bar color by status (uses semantic Tailwind tokens, not hardcoded colors).
 // ---------------------------------------------------------------------------
 
-const STATUS_BAR_BG: Record<IssueStatus, string> = {
+// Keyed by CATEGORY, not by status key: an issue on a custom status draws in
+// the color of the category it behaves as. Keying this by IssueStatus made the
+// lookup `undefined` for every custom key, so the bar lost its color entirely.
+// (MUL-6243)
+const STATUS_BAR_BG: Record<IssueStatusCategory, string> = {
   backlog: "bg-muted-foreground/60",
   todo: "bg-muted-foreground/70",
   in_progress: "bg-warning",
@@ -317,6 +322,7 @@ function ScheduledRow({
   totalDays: number;
 }) {
   const { t } = useT("issues");
+  const locale = useLocale();
   const p = useWorkspacePaths();
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
@@ -350,7 +356,6 @@ function ScheduledRow({
     }
   }
 
-  const locale = typeof navigator !== "undefined" ? navigator.language : "en";
   const fmt = (d: Date) =>
     d.toLocaleDateString(locale, {
       month: "short",
@@ -369,10 +374,15 @@ function ScheduledRow({
         <IssueDetailLink
           issueId={issue.id}
           href={p.issueDetail(issue.id)}
+          newTabTitle={issue.identifier}
           className="sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-body min-w-0"
           style={{ width: LEFT_COL_WIDTH }}
         >
-          <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
+          <StatusIcon
+            status={issue.status}
+            category={issueStatusCategory(issue) ?? undefined}
+            className="h-3.5 w-3.5"
+          />
           <PriorityIcon priority={issue.priority} />
           <span className="w-14 shrink-0 text-caption text-muted-foreground tabular-nums truncate">
             {issue.identifier}
@@ -400,18 +410,19 @@ function ScheduledRow({
                   <IssueDetailLink
                     issueId={issue.id}
                     href={p.issueDetail(issue.id)}
+                    newTabTitle={issue.identifier}
                     className={cn(
                       "absolute top-1/2 -translate-y-1/2 transition-opacity hover:opacity-90",
                       bar.isMarker
                         ? "h-3 w-3 rotate-45 rounded-[2px]"
                         : "h-5 rounded-md",
-                      STATUS_BAR_BG[issue.status],
+                      STATUS_BAR_BG[issueStatusCategory(issue) ?? "todo"],
                       inverted && "ring-2 ring-destructive ring-offset-1 ring-offset-background",
                     )}
                     style={{ left: bar.left, width: bar.width }}
                   >
                     {!bar.isMarker && bar.width > 60 && (
-                      <span className="block truncate px-2 py-[2px] text-micro leading-4 text-white/95">
+                      <span className="block truncate px-2 py-[2px] text-micro leading-4 text-white">
                         {issue.title}
                       </span>
                     )}

@@ -243,7 +243,7 @@ export function SquadDetailPage() {
           isArchived={isArchived}
           getEntityName={getEntityName}
           onAddMemberClick={() => setShowAddMember(true)}
-          onCreateAgentClick={canManage ? () => push(`${p.newAgent()}?squad=${encodeURIComponent(squadId)}`) : undefined}
+          createAgentHref={canManage ? `${p.newAgent()}?squad=${encodeURIComponent(squadId)}` : undefined}
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
@@ -300,7 +300,7 @@ export function SquadDetailPage() {
 function SquadDetailSkeleton() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="px-5">
+      <PageHeader>
         <Skeleton className="h-5 w-48" />
       </PageHeader>
       <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -393,7 +393,7 @@ function SquadNameEditor({
           className="group -mx-1 inline-flex items-center gap-1.5 self-start rounded px-1 text-left text-title font-semibold leading-tight transition-colors hover:bg-accent/50"
         >
           <span>{value}</span>
-          <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
+          <Pencil className="h-3.5 w-3.5 shrink-0 text-transparent transition-colors group-hover:text-muted-foreground" />
         </button>
       )}
     </InlineEditPopover>
@@ -620,7 +620,7 @@ function AddMemberDialog({
           <div>
             <Label className="text-caption text-muted-foreground">
               {t(($) => $.add_member_dialog.label_role)}{" "}
-              <span className="text-muted-foreground/60">{t(($) => $.add_member_dialog.label_optional)}</span>
+              <span className="text-muted-foreground">{t(($) => $.add_member_dialog.label_optional)}</span>
             </Label>
             <Input
               type="text"
@@ -770,7 +770,7 @@ function SquadDetailInspector({
                   {squad.description}
                 </span>
               ) : (
-                <span className="text-caption italic leading-relaxed text-muted-foreground/50">
+                <span className="text-caption italic leading-relaxed text-muted-foreground">
                   {t(($) => $.description_dialog.placeholder_empty)}
                 </span>
               )}
@@ -844,9 +844,9 @@ function SquadDescriptionEditor({
         {value ? (
           <span className="text-muted-foreground">{value}</span>
         ) : (
-          <span className="italic text-muted-foreground/50">{t(($) => $.description_dialog.placeholder_empty)}</span>
+          <span className="italic text-muted-foreground">{t(($) => $.description_dialog.placeholder_empty)}</span>
         )}
-        <Pencil className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
+        <Pencil className="mt-0.5 h-3 w-3 shrink-0 text-transparent transition-colors group-hover:text-muted-foreground" />
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -947,7 +947,7 @@ function SquadOverviewPane({
   isArchived,
   getEntityName,
   onAddMemberClick,
-  onCreateAgentClick,
+  createAgentHref,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -968,7 +968,7 @@ function SquadOverviewPane({
   // Optional — only passed when the current user can manage the squad
   // (workspace owner/admin or the creator). Hidden otherwise so viewers
   // don't see a button they can't action.
-  onCreateAgentClick?: () => void;
+  createAgentHref?: string;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -1025,7 +1025,7 @@ function SquadOverviewPane({
               isArchived={isArchived}
               getEntityName={getEntityName}
               onAddMemberClick={onAddMemberClick}
-              onCreateAgentClick={onCreateAgentClick}
+              createAgentHref={createAgentHref}
               onSetLeader={onSetLeader}
               onRemoveMember={onRemoveMember}
               onUpdateRole={onUpdateRole}
@@ -1090,7 +1090,7 @@ function SquadMembersTab({
   isArchived,
   getEntityName,
   onAddMemberClick,
-  onCreateAgentClick,
+  createAgentHref,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -1106,7 +1106,7 @@ function SquadMembersTab({
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
   // Hidden for viewers who can't manage — see SquadOverviewPane.
-  onCreateAgentClick?: () => void;
+  createAgentHref?: string;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -1126,8 +1126,13 @@ function SquadMembersTab({
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
-            {onCreateAgentClick && (
-              <Button size="sm" variant="outline" onClick={onCreateAgentClick}>
+            {createAgentHref && (
+              <Button
+                size="sm"
+                variant="outline"
+                render={<AppLink href={createAgentHref} />}
+                nativeButton={false}
+              >
                 <Plus className="size-3.5 mr-1.5" />
                 {t(($) => $.members_tab.create_agent_button)}
               </Button>

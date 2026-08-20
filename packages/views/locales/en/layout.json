@@ -8,7 +8,7 @@
     "autopilots": "Autopilot",
     "agents": "Agents",
     "squads": "Squads",
-    "usage": "Usage",
+    "usage": "Analytics",
     "designs": "Designs",
     "runtimes": "Runtimes",
     "skills": "Skills",
@@ -57,7 +57,6 @@
     "unread_overflow": "99+",
     "discord_card": {
       "title": "Join our Discord",
-      "description": "Chat with the team and other builders.",
       "dismiss": "Dismiss"
     }
   }

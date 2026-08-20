@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -31,6 +32,7 @@ const STEPS = [
 
 const COLOURS = [
   "text-muted-foreground",
+  "text-faint-foreground",
   "text-foreground",
   "text-sidebar-foreground/70",
   "text-brand",

@@ -198,7 +198,7 @@ export function PropertiesTab() {
             </div>
           ) : visible.length === 0 ? (
             <div className="px-4 py-12 text-center">
-              <SlidersHorizontal className="mx-auto size-6 text-muted-foreground/60" />
+              <SlidersHorizontal className="mx-auto size-6 text-faint-foreground" />
               <p className="mt-3 text-body font-medium">
                 {query
                   ? t(($) => $.properties.no_results)
@@ -346,6 +346,10 @@ export function PropertyTypeLabel({ type }: { type: string }) {
       return <>{t(($) => $.properties.types.checkbox)}</>;
     case "url":
       return <>{t(($) => $.properties.types.url)}</>;
+    case "actor":
+      return <>{t(($) => $.properties.types.actor)}</>;
+    case "multi_actor":
+      return <>{t(($) => $.properties.types.multi_actor)}</>;
     default:
       // Forward compat: newer servers may ship types this build doesn't know.
       return <>{type}</>;
@@ -570,7 +574,7 @@ function PropertyEditorDialog({
               <div className="space-y-2">
                 {draft.options.map((option, index) => (
                   <div key={option.id ?? index} className="flex items-center gap-2">
-                    <GripVertical className="size-4 shrink-0 text-muted-foreground/40" />
+                    <GripVertical className="size-4 shrink-0 text-faint-foreground" />
                     <ColorPicker
                       value={option.color}
                       onChange={(color) => setOption(index, { color })}

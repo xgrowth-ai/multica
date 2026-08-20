@@ -36,8 +36,8 @@ func createCommentTriggerPreviewIssue(t *testing.T, title string, assigneeType, 
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
-		VALUES ($1, 'member', $2, $3, $4, $5, $6)
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number, last_activity_at)
+		VALUES ($1, 'member', $2, $3, $4, $5, $6, now())
 		RETURNING id
 	`, testWorkspaceID, testUserID, title, assigneeTypeArg, assigneeIDArg, number).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -170,6 +170,58 @@ func requirePreviewAgents(t *testing.T, preview CommentTriggerPreviewResponse, w
 		if _, ok := got[want]; !ok {
 			t.Fatalf("preview agents = %+v, missing id %s", preview.Agents, want)
 		}
+	}
+}
+
+func TestCommentTriggers_PlainReplyToUnownedMemberRootSkipsAssigneeFallback(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	assigneeID := createHandlerTestAgent(t, "Unowned Member Thread Assignee", nil)
+	leaderID := createHandlerTestAgent(t, "Unowned Member Thread Leader", nil)
+	squadID := createCommentTriggerPreviewSquad(t, "Unowned Member Thread Squad", leaderID)
+
+	tests := []struct {
+		name          string
+		assigneeType  string
+		assigneeID    string
+		routedAgentID string
+	}{
+		{
+			name:          "agent assignee",
+			assigneeType:  "agent",
+			assigneeID:    assigneeID,
+			routedAgentID: assigneeID,
+		},
+		{
+			name:          "squad assignee",
+			assigneeType:  "squad",
+			assigneeID:    squadID,
+			routedAgentID: leaderID,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issueID := createCommentTriggerPreviewIssue(t, "plain reply to unowned member thread", tt.assigneeType, tt.assigneeID)
+			rootID := insertMemberRootCommentForTriggerPreviewTest(t, issueID, "human-only discussion")
+			replyContent := "plain human reply"
+
+			preview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
+				Content:  replyContent,
+				ParentID: &rootID,
+			})
+			requirePreviewAgents(t, preview)
+
+			postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+				"content":   replyContent,
+				"parent_id": rootID,
+			})
+			if got := countQueuedCommentTriggerTasks(t, issueID, tt.routedAgentID); got != 0 {
+				t.Fatalf("plain member reply queued assignee tasks = %d, want 0", got)
+			}
+		})
 	}
 }
 
@@ -1135,7 +1187,15 @@ func TestPreviewCommentTriggers_AllPlusMemberMentionStaysSuppressed(t *testing.T
 // straight to the panicking parseUUID (util.MustParseUUID), turning attacker-
 // controlled comment text into a 500 — and on the create path the comment row
 // was already committed before the panic. Malformed ids must be reported as
-// blocked mentions, exactly like a well-formed id that owns no entity.
+// blocked mentions, never as an error response.
+//
+// The reason is target_unavailable on BOTH the agent and the squad path
+// (MUL-5548): a string that is not a UUID cannot name an entity in any
+// workspace, so it conceals no existence and must not be blamed on invoke
+// permission. This is deliberately NOT the well-formed-but-unresolved case,
+// which stays invocation_not_allowed so a blocked reason can never confirm a
+// private agent — that boundary is pinned by
+// TestCreateComment_BlockedMentionReasonDoesNotEnumeratePrivateAgent.
 func TestPreviewCommentTriggers_MalformedMentionIDDoesNotPanic(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -1156,14 +1216,14 @@ func TestPreviewCommentTriggers_MalformedMentionIDDoesNotPanic(t *testing.T) {
 			content:    "[@Broken](mention://agent/-) please look",
 			targetType: "agent",
 			targetID:   "-",
-			reason:     ReasonInvocationNotAllowed,
+			reason:     ReasonTargetUnavailable,
 		},
 		{
 			name:       "short hex agent id",
 			content:    "[@Broken](mention://agent/dead-beef) please look",
 			targetType: "agent",
 			targetID:   "dead-beef",
-			reason:     ReasonInvocationNotAllowed,
+			reason:     ReasonTargetUnavailable,
 		},
 		{
 			name:       "malformed squad id",
@@ -1177,7 +1237,7 @@ func TestPreviewCommentTriggers_MalformedMentionIDDoesNotPanic(t *testing.T) {
 			content:    "[@all](mention://all/all) heads up [@Broken](mention://agent/-) please look",
 			targetType: "agent",
 			targetID:   "-",
-			reason:     ReasonInvocationNotAllowed,
+			reason:     ReasonTargetUnavailable,
 		},
 		{
 			name:       "all plus malformed squad id",

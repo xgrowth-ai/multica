@@ -4,13 +4,13 @@ import { useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
-  BookOpen,
   Download,
   HardDrive,
   Lock,
   Pencil,
   Plus,
 } from "lucide-react";
+import { SkillIcon } from "../lib/skill-icon";
 import type {
   Agent,
   AgentRuntime,
@@ -50,14 +50,18 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
-import { useNavigation, useRowLink } from "../../navigation";
+import {
+  rowLinkInteractiveProps,
+  useNavigation,
+  useRowLink,
+} from "../../navigation";
 import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
   CollectionPageState,
 } from "../../layout/collection-page";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
-import { readOrigin, type OriginInfo } from "../lib/origin";
+import { originSourceUrl, readOrigin, type OriginInfo } from "../lib/origin";
 import { CreateSkillDialog } from "./create-skill-dialog";
 import {
   useSkillsViewStore,
@@ -173,7 +177,7 @@ function PageHeaderBar({
   const { t } = useT("skills");
   return (
     <CollectionPageHeader
-      icon={BookOpen}
+      icon={SkillIcon}
       title={t(($) => $.page.title)}
       count={totalCount}
       description={t(($) => $.page.tagline)}
@@ -244,7 +248,7 @@ function NameCell({ row }: { row: SkillRow }) {
         <Tooltip>
           <TooltipTrigger
             render={
-              <Lock className="h-3 w-3 shrink-0 text-muted-foreground/60" />
+              <Lock className="h-3 w-3 shrink-0 text-faint-foreground" />
             }
           />
           <TooltipContent>{t(($) => $.table.lock_tooltip)}</TooltipContent>
@@ -259,7 +263,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
   if (agents.length === 0) {
     return (
       <ListGridCell>
-        <span className="text-caption text-muted-foreground/70">
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.table.unused)}
         </span>
       </ListGridCell>
@@ -348,10 +352,33 @@ function SourceCell({
     label = t(($) => $.table.source_github);
   }
 
+  // Imported skills link to their upstream page; the anchor must not bubble
+  // its click OR auxclick into the row's whole-row navigation.
+  const sourceUrl = originSourceUrl(origin);
+
   return (
     <ListGridCell className="hidden gap-1.5 text-caption text-muted-foreground @2xl:flex">
       {icon}
-      <span className="min-w-0 truncate">{label}</span>
+      {sourceUrl ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <a
+                href={sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                {...rowLinkInteractiveProps}
+                className="min-w-0 truncate hover:underline"
+              >
+                {label}
+              </a>
+            }
+          />
+          <TooltipContent side="top">{sourceUrl}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <span className="min-w-0 truncate">{label}</span>
+      )}
     </ListGridCell>
   );
 }
@@ -384,7 +411,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   const { t } = useT("skills");
   return (
     <CollectionPageState
-      icon={BookOpen}
+      icon={SkillIcon}
       title={t(($) => $.page.empty.title)}
       description={t(($) => $.page.empty.description)}
       actions={
@@ -872,7 +899,7 @@ export default function SkillsPage() {
                 className={`cursor-pointer ${
                   selectedIds.has(row.skill.id) ? "bg-accent/30" : ""
                 }`}
-                {...rowLink(paths.skillDetail(row.skill.id))}
+                {...rowLink(paths.skillDetail(row.skill.id), row.skill.name)}
               >
                 <CheckboxCell
                   checked={selectedIds.has(row.skill.id)}

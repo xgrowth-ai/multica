@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { parseFrontmatter } from "@multica/core/skills/frontmatter";
 import { RichContent } from "../../rich-content";
@@ -30,27 +30,51 @@ export function FileViewer({
   content,
   mode,
   readOnly,
+  autoFocus,
   onChange,
+  onFocusHandled,
 }: {
   path: string;
   content: string;
   mode: FileMode;
   readOnly: boolean;
+  /** Set by "Edit": put the caret in this file's editor once it renders. */
+  autoFocus?: boolean;
   onChange: (content: string) => void;
+  /** Called once the caret has landed, so the request is not replayed. */
+  onFocusHandled?: () => void;
 }) {
   const { t } = useT("skills");
   const isMd = isMarkdownPath(path);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
 
   const body = useMemo(
     () => (isMd ? parseFrontmatter(content).body : content),
     [content, isMd],
   );
 
+  // The caller flips the mode to raw in the same update that raises this flag,
+  // so by the time the effect runs the textarea below is mounted. Focusing
+  // through a request the page owns — rather than `autoFocus` on the element —
+  // is what makes "Edit" work on the file that is ALREADY open: that path
+  // changes no key, mounts nothing, and would never re-run a mount-only focus.
+  useEffect(() => {
+    if (autoFocus !== true) return;
+    const el = editorRef.current;
+    if (!el) return;
+    el.focus();
+    // Caret at the top. Jumping to the end of a multi-thousand-character
+    // reference file would scroll away the content the user just clicked.
+    el.setSelectionRange(0, 0);
+    onFocusHandled?.();
+  }, [autoFocus, onFocusHandled]);
+
   // Non-markdown files have nothing to preview; they are always raw.
   if (isMd && mode === "preview") {
     return (
       <div className="h-full overflow-y-auto">
-        <div className="mx-auto max-w-[68ch] px-6 py-7 sm:px-8">
+        {/* pb-24: keeps the last lines readable under the floating save pill. */}
+        <div className="mx-auto max-w-[68ch] px-6 pb-24 pt-7 sm:px-8">
           <RichContent
             content={body || t(($) => $.file_viewer.no_content)}
             density="document"
@@ -63,6 +87,7 @@ export function FileViewer({
 
   return (
     <Textarea
+      ref={editorRef}
       value={content}
       readOnly={readOnly}
       onChange={(e) => onChange(e.target.value)}
@@ -72,7 +97,7 @@ export function FileViewer({
           ? t(($) => $.file_viewer.markdown_placeholder)
           : t(($) => $.file_viewer.raw_placeholder)
       }
-      className="h-full min-h-full resize-none rounded-none border-0 px-6 py-5 font-mono text-body leading-relaxed read-only:cursor-default focus-visible:ring-0 sm:px-8"
+      className="h-full min-h-full resize-none rounded-none border-0 px-6 pb-24 pt-5 font-mono text-body leading-relaxed read-only:cursor-default focus-visible:ring-0 sm:px-8"
     />
   );
 }

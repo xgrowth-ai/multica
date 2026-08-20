@@ -35,7 +35,7 @@ import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
 import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import { taskStatusConfig } from "../../config";
-import { failureReasonLabel } from "./task-failure";
+import { cancelReasonLabel, failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
 
@@ -586,9 +586,14 @@ function TaskRow({
   // Failure reason. The back-end emits "" on non-failed tasks (omitempty
   // strips it on the wire) so the truthy guard is the right shape.
   // failureReasonLabel takes the raw open string — the taxonomy has 21
-  // values and grows, so there is no enum to cast to.
+  // values and grows, so there is no enum to cast to. Cancelled rows get a
+  // label only when the SERVER cancelled them for a persisted reason
+  // (worktree claim gate, preserved-work delivery); a user's own cancel
+  // stays a plain "Cancelled".
   const failureLabel =
-    task.status === "failed" ? failureReasonLabel(task.failure_reason) : null;
+    task.status === "failed"
+      ? failureReasonLabel(task.failure_reason)
+      : cancelReasonLabel(task);
 
   // Only show duration for terminal rows. An active row's duration is
   // inferred from the timeText already ("Started 2m ago") and adding a
@@ -619,7 +624,7 @@ function TaskRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <SourceIcon
-            className="h-3 w-3 shrink-0 text-muted-foreground/70"
+            className="h-3 w-3 shrink-0 text-faint-foreground"
             aria-label={sourceLabel}
           />
           {issue && (
@@ -645,7 +650,7 @@ function TaskRow({
                 }
               />
               <TooltipContent className="max-w-md">
-                <div className="text-micro font-medium uppercase tracking-wider text-muted-foreground/80">
+                <div className="text-micro font-medium uppercase tracking-wider text-muted-foreground">
                   {t(($) => $.tab_body.activity.triggered_by)}
                 </div>
                 <div className="mt-0.5 whitespace-pre-wrap text-caption">
@@ -677,7 +682,11 @@ function TaskRow({
           {failureLabel && (
             <>
               <Sep />
-              <span className="text-destructive">{failureLabel}</span>
+              {/* Hover reveals the actionable text ("upgrade the daemon on
+                  that machine", "work preserved at …"), not just the bucket. */}
+              <span className="text-destructive" title={task.error ?? undefined}>
+                {failureLabel}
+              </span>
             </>
           )}
           {/* Accountable member (MUL-4302 §9): whose behalf this run is on.
@@ -763,7 +772,7 @@ function Section({
         <h2 className="text-body font-semibold text-foreground">
           {title}
         </h2>
-        <span className="text-micro text-muted-foreground/70">{subtitle}</span>
+        <span className="text-micro text-muted-foreground">{subtitle}</span>
       </div>
       {children}
     </section>
@@ -771,14 +780,14 @@ function Section({
 }
 
 function EmptyText({ children }: { children: ReactNode }) {
-  return <p className="text-caption italic text-muted-foreground/60">{children}</p>;
+  return <p className="text-caption italic text-muted-foreground">{children}</p>;
 }
 
 function Sep() {
   // mx-1 puts visible whitespace around the dot; without it inline JSX
   // collapses neighbouring tokens to "100% success·avg 30s" which reads
   // as "successdotavg" at a glance.
-  return <span className="mx-1 text-muted-foreground/40">·</span>;
+  return <span className="mx-1 text-faint-foreground">·</span>;
 }
 
 type AgentsT = ReturnType<typeof useT<"agents">>["t"];

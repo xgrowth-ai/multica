@@ -19,6 +19,7 @@ import {
   IssueDisplayControls,
   ViewRefreshIndicator,
 } from "../issues/components/issues-header";
+import { FilterChipsBar } from "../issues/components/filter-chips-bar";
 import { IssueSurface } from "../issues/surface/issue-surface";
 import { useT } from "../i18n";
 
@@ -50,6 +51,7 @@ function ActorIssuesHeader({
   const { t } = useT("issues");
 
   return (
+    <>
     <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b px-4">
       <div className="flex items-center gap-3">
         <div className="relative">
@@ -98,6 +100,8 @@ function ActorIssuesHeader({
         <ViewRefreshIndicator active={isRefreshing} />
       </div>
     </div>
+    <FilterChipsBar />
+    </>
   );
 }
 
@@ -146,7 +150,7 @@ export function ActorIssuesPanel({
       renderEmpty={() =>
         search.trim() === "" ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-            <ListTodo className="h-10 w-10 text-muted-foreground/40" />
+            <ListTodo className="h-10 w-10 text-faint-foreground" />
             <p className="text-body">
               {t(($) => $.actor_issues.empty[scope].title)}
             </p>
@@ -156,7 +160,7 @@ export function ActorIssuesPanel({
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-            <Search className="h-10 w-10 text-muted-foreground/40" />
+            <Search className="h-10 w-10 text-faint-foreground" />
             <p className="text-body">{t(($) => $.actor_issues.search_empty)}</p>
           </div>
         )

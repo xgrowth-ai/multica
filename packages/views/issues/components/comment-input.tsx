@@ -7,21 +7,25 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
-import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useCommentUploads } from "./use-comment-uploads";
+import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
+import { useStickyComposer } from "../hooks/use-sticky-composer";
 
 interface CommentInputProps {
   issueId: string;
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<string | boolean>;
+  /** Called after the server accepts the comment and the composer is cleared. */
+  onAccepted?: (commentId: string) => void;
 }
 
-function CommentInput({ issueId, onSubmit }: CommentInputProps) {
+function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
@@ -33,6 +37,9 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   // `defaultValue` at mount time, so this snapshot drives both the editor's
   // initial content and the submit-button enable state — without this the
   // button would be disabled even though the editor visibly contains text.
+  // Quick actions in the `/` menu: picking one inserts the server-rendered
+  // body so the user can edit before sending, instead of firing immediately.
+  const quickActionMenu = useQuickActionMenu(issueId);
   const draftKey = `new:${issueId}` as const;
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),
@@ -66,8 +73,9 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     onDrop: lazy.uploadOrQueue,
   });
   // Sticky preference (Settings → Preferences): issue-detail pins this
-  // composer to the bottom of the scroll viewport when enabled.
-  const sticky = useCommentComposerStore((s) => s.sticky);
+  // composer to the bottom of the scroll viewport when enabled. Shared with
+  // the host so the height cap below can never outlive the pinning.
+  const sticky = useStickyComposer();
 
   // Draft persistence. Hydrate from store on mount via `defaultValue` above
   // (ContentEditorRef has no setContent, so this is the only injection point).
@@ -129,6 +137,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   // leave a mid-flight draft in place: dropping the caret then would yank it
   // out of the sentence the user is still typing.
   const editorScrubbedRef = useRef(false);
+  const acceptedCommentIdRef = useRef<string | null>(null);
 
   const { submitting, submit } = useComposerSubmit({
     editorRef,
@@ -158,7 +167,10 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-      );
+      ).then((commentId) => {
+        acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
+        return !!commentId;
+      });
     },
     onAccepted: () => {
       // Success may only consume the entry it submitted (MUL-5181 P0): edits
@@ -178,6 +190,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       setIsEmpty(true);
       setSuppressedAgentIds(new Set());
       editorScrubbedRef.current = true;
+      if (acceptedCommentIdRef.current) onAccepted?.(acceptedCommentIdRef.current);
     },
   });
 
@@ -225,6 +238,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           attachments={pendingAttachments}
           enableSlashCommands
           slashCommandMode="command"
+          quickActionMenu={quickActionMenu}
         />
       </div>
       )}

@@ -26,7 +26,6 @@ import {
 import { useAutoSave } from "../../settings/components/use-auto-save";
 import { useT } from "../../i18n";
 import { CharCounter } from "./char-counter";
-import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import {
   buildModelChangeUpdate,
@@ -137,13 +136,14 @@ export function AgentDetailInspector({
     (model: string) =>
       update(
         buildModelChangeUpdate({
+          provider: runtime?.provider ?? "",
           model,
           thinkingLevel: agent.thinking_level ?? "",
           serviceTier: agent.service_tier ?? "",
           catalog: modelCatalog,
         }),
       ),
-    [agent.service_tier, agent.thinking_level, modelCatalog, update],
+    [agent.service_tier, agent.thinking_level, modelCatalog, runtime?.provider, update],
   );
 
   return (
@@ -174,6 +174,7 @@ export function AgentDetailInspector({
                 size={56}
                 disabled={!canEdit}
                 onUploaded={(url) => update({ avatar_url: url })}
+                onEmojiSelected={(value) => update({ avatar_url: value })}
               />
             </div>
           </SettingsRow>
@@ -226,18 +227,6 @@ export function AgentDetailInspector({
                 max={AGENT_DESCRIPTION_MAX_LENGTH}
               />
             </div>
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.inspector.labels_label)}
-            description={t(($) => $.inspector.labels_hint)}
-            size="text"
-            align="start"
-          >
-            <ResourceLabelPicker
-              resourceType="agent"
-              resourceId={agent.id}
-              canEdit={canEdit}
-            />
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>
@@ -302,6 +291,7 @@ export function AgentDetailInspector({
             label={t(($) => $.inspector.prop_speed)}
             runtimeId={agent.runtime_id}
             runtimeOnline={!!isOnline}
+            provider={runtime?.provider ?? ""}
             model={agent.model ?? ""}
             value={agent.service_tier ?? ""}
             canEdit={canEdit}

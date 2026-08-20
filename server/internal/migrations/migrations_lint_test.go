@@ -15,6 +15,17 @@ import (
 const maxLegacyMigrationPrefix = 148
 
 var legacyDuplicateMigrationStems = map[string][]string{
+	// These prefixes were released by the fork before upstream occupied the
+	// same numbers. Keep their full stems stable: deployed fork instances may
+	// already have them recorded in schema_migrations.
+	"235": {"235_chat_message_quick_actions", "235_design_draft"},
+	"236": {"236_agent_task_quick_actions_disabled", "236_design_draft_workspace_index"},
+	"237": {"237_issue_pending_verification_status", "237_quick_action"},
+	// 362 is not historical: two PRs took the prefix within the same hour and
+	// both merged. It is listed here rather than renamed because the runner
+	// keys the ledger on the full stem, so renaming a migration that already
+	// ran would re-run it in every environment that has it.
+	"362": {"362_agent_task_durable_work_dir", "362_plugin_hook_engine"},
 	"020": {"020_issue_number", "020_task_session"},
 	"026": {"026_comment_reactions", "026_task_messages"},
 	"029": {"029_attachment", "029_daemon_token", "029_drop_daemon_pairing"},

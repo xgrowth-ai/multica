@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ExternalLink,
   Globe,
   Loader2,
   MoreHorizontal,
@@ -36,6 +37,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -50,7 +52,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { useRowLink } from "../../navigation";
+import { useIntentNavigate, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { ProviderLogo } from "./provider-logo";
@@ -390,7 +392,7 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
   if (usage.length === 0) {
     return (
       <div className="w-full text-right">
-        <span className="text-caption text-muted-foreground/50">—</span>
+        <span className="text-caption text-faint-foreground">—</span>
       </div>
     );
   }
@@ -451,7 +453,7 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
     const command = pendingRuntimeCommandName(runtime);
     if (!command) {
       return (
-        <span className="text-caption text-muted-foreground/50">
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.list.pending_cli_unknown)}
         </span>
       );
@@ -469,7 +471,7 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   }
 
   if (runtime.runtime_mode === "cloud") {
-    return <span className="text-caption text-muted-foreground/50">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
   const meta = runtime.metadata as Record<string, unknown> | null;
   // `version` is the agent's own underlying CLI tool version — distinct per
@@ -483,7 +485,7 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
     meta && typeof meta.version === "string" ? meta.version : null;
 
   if (!version) {
-    return <span className="text-caption text-muted-foreground/50">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
 
   return (
@@ -500,7 +502,7 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
 // surfaces AgentProfileCard.
 function AgentStack({ agentIds }: { agentIds: string[] }) {
   if (agentIds.length === 0) {
-    return <span className="text-caption text-muted-foreground/50">—</span>;
+    return <span className="text-caption text-faint-foreground">—</span>;
   }
   const visible = agentIds.slice(0, 3);
   const extra = agentIds.length - visible.length;
@@ -533,18 +535,26 @@ export function RuntimeRowMenu({
   profile,
   wsId,
   canDelete,
+  detailHref,
 }: {
   runtime: AgentRuntime;
   profile: RuntimeProfile | null;
   wsId: string;
   canDelete: boolean;
+  /**
+   * Detail destination for the row, omitted when the row has none — pending
+   * custom runtimes are not navigable, mirroring the list's own row link.
+   */
+  detailHref?: string;
 }) {
   const { t } = useT("runtimes");
+  const { t: tCommon } = useT("common");
+  const intentNavigate = useIntentNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const isCustomRuntime = !!runtime.profile_id;
-  // Delete is currently the only row action; if the row can't run it, drop
-  // the kebab entirely so the column doesn't render an empty popover. We
+  // Delete is the row's only management action; if the row can't run it, drop
+  // the kebab entirely so the column doesn't render a near-empty popover. We
   // used to also hide it for self-healing runtimes (live local daemon
   // re-registers within seconds), but MUL-3352 surfaced that owners read
   // a missing kebab as "I lost my permission" rather than "the daemon
@@ -570,6 +580,17 @@ export function RuntimeRowMenu({
           }
         />
         <DropdownMenuContent align="end" className="w-40">
+          {detailHref && (
+            <>
+              <DropdownMenuItem
+                onClick={() => intentNavigate(detailHref, "foreground-tab")}
+              >
+                <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
+                {tCommon(($) => $.navigation.open_in_new_tab)}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
           {isCustomRuntime && profile && (
             <DropdownMenuItem onClick={() => setEditOpen(true)}>
               <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
@@ -743,16 +764,15 @@ export function RuntimeList({
         </ListGridHeader>
         {rows.map((row) => {
           const pending = isPendingCustomRuntime(row.runtime);
+          const detailHref = pending
+            ? undefined
+            : runtimeHref?.(row.runtime.id) ??
+              wsPaths.runtimeDetail(row.runtime.id);
           return (
             <ListGridRow
               key={row.runtime.id}
               className={pending ? "cursor-default" : "cursor-pointer"}
-              {...(!pending
-                ? rowLink(
-                    runtimeHref?.(row.runtime.id) ??
-                      wsPaths.runtimeDetail(row.runtime.id),
-                  )
-                : {})}
+              {...(detailHref ? rowLink(detailHref) : {})}
             >
               <RuntimeNameCell runtime={row.runtime} machineTitle={machineTitle} />
               <HealthCell
@@ -774,7 +794,7 @@ export function RuntimeList({
                       </span>
                     </>
                   ) : (
-                    <span className="text-caption text-muted-foreground/50">—</span>
+                    <span className="text-caption text-faint-foreground">—</span>
                   )}
                 </ListGridCell>
               ) : (
@@ -786,7 +806,7 @@ export function RuntimeList({
               <ListGridCell className="hidden @2xl:flex">
                 {pending ? (
                   <div className="w-full text-right">
-                    <span className="text-caption text-muted-foreground/50">—</span>
+                    <span className="text-caption text-faint-foreground">—</span>
                   </div>
                 ) : (
                   <CostCell runtimeId={row.runtime.id} />
@@ -805,6 +825,7 @@ export function RuntimeList({
                     profile={row.profile}
                     wsId={wsId}
                     canDelete={row.canDelete}
+                    detailHref={detailHref}
                   />
                 </span>
               </ListGridCell>
