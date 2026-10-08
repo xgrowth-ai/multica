@@ -5,7 +5,7 @@ description: Configure email verification codes, Google sign-in, and who can sig
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica signs users in with email verification codes by default; Google OAuth can be added on top. Existing users can always sign in again — signup restrictions only decide whether new accounts can be created.
+Multica signs users in with email verification codes by default; Google OAuth can be added on top. Signup restrictions apply to new accounts. The explicit email allowlist also applies to existing accounts when using the shared Feishu verification channel.
 
 ## Email verification codes
 
@@ -57,9 +57,24 @@ SMTP_EHLO_NAME=mail.example.com
 
 ### Behavior without an email service
 
-The server still starts, but verification codes and invitation links are only written to the log; no email is sent. This suits local development, not production.
+In development, verification codes are written to the log when no provider is configured. With `APP_ENV=production`, email login returns 503 instead of logging a code. Other authentication methods and the server remain available.
 
 The startup log states whether the current mode is `Resend API`, `SMTP relay`, or `DEV mode`.
+
+### Trusted internal Feishu channel
+
+An internal instance can explicitly send verification codes to a trusted Feishu group:
+
+```dotenv
+VERIFICATION_CODE_DELIVERY=feishu
+FEISHU_VERIFICATION_WEBHOOK_URL=<HTTPS robot webhook>
+ALLOW_SIGNUP=false
+ALLOWED_EMAILS=alice@example.com,bob@example.com
+```
+
+Codes go directly to the robot; the backend does not log them. Only exact entries in `ALLOWED_EMAILS` can request or verify a code, including existing accounts. A domain allowlist does not authorize this channel. Group members who can read the codes can sign in as these accounts, so use a group with an appropriate access boundary. An absent webhook or empty email list disables delivery.
+
+All deployments limit authentication requests even without Redis. Redis-backed deployments return 503 if their shared limiter is unavailable. Code issuance is serialized per email, newer codes invalidate older ones, and a code permits at most five failed attempts and one successful consumption.
 
 ## Fixed local verification code
 

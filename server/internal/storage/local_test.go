@@ -385,6 +385,40 @@ func TestLocalStorage_ServeFile_RejectsPathTraversal(t *testing.T) {
 	}
 }
 
+func TestLocalStorage_ServeFile_DeniesDirectoriesAndEscapingSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", dir)
+	store := NewLocalStorageFromEnv()
+	if err := os.Mkdir(filepath.Join(dir, "private"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "private", "secret.txt"), []byte("private data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("outside data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(dir, "escape.txt")); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"", "private/", "escape.txt"} {
+		req := httptest.NewRequest("GET", "/uploads/"+key, nil)
+		rec := httptest.NewRecorder()
+		store.ServeFile(rec, req, key)
+		if rec.Code != 404 {
+			t.Fatalf("%q returned %d, want 404", key, rec.Code)
+		}
+	}
+	req := httptest.NewRequest("GET", "/uploads/private/secret.txt", nil)
+	req.Header.Set("Range", "bytes=0-0")
+	rec := httptest.NewRecorder()
+	store.ServeFile(rec, req, "private/secret.txt")
+	if rec.Code != 206 || rec.Body.Len() != 1 {
+		t.Fatalf("file Range behavior: status=%d bytes=%d", rec.Code, rec.Body.Len())
+	}
+}
+
 // TestLocalStorage_Upload_SkipsSidecarWhenFilenameEmpty verifies the tighter
 // Upload gate: a write with no filename has nothing useful to preserve, so
 // we shouldn't litter the upload directory with content-type-only sidecars

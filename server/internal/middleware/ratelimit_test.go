@@ -2,11 +2,17 @@ package middleware
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/go-redis/redismock/v9"
 )
 
 var okHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,7 +29,69 @@ func TestRateLimit_NilRedis(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("nil redis should pass through; got status %d", rec.Code)
+		t.Fatalf("first request: got %d", rec.Code)
+	}
+	for i := 0; i < 5; i++ {
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req.Clone(req.Context()))
+	}
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("nil Redis must still enforce the limit; got %d", rec.Code)
+	}
+}
+
+func TestRateLimit_MemoryConcurrent(t *testing.T) {
+	var successes atomic.Int32
+	handler := RateLimit(nil, 5, time.Minute, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		successes.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	var wg sync.WaitGroup
+	for i := 0; i < 40; i++ {
+		wg.Go(func() {
+			req := httptest.NewRequest(http.MethodPost, "/auth/send-code", nil)
+			req.RemoteAddr = "203.0.113.42:1234"
+			handler.ServeHTTP(httptest.NewRecorder(), req)
+		})
+	}
+	wg.Wait()
+	if got := successes.Load(); got != 5 {
+		t.Fatalf("allowed %d concurrent requests, want 5", got)
+	}
+}
+
+func TestRateLimit_RedisUnavailableRejectsRequest(t *testing.T) {
+	rdb, mock := redismock.NewClientMock()
+	defer rdb.Close()
+	mock.ExpectEvalSha(rateLimitScript.Hash(), []string{rateLimitKey("/auth/send-code", "203.0.113.1")}, 60).SetErr(errors.New("unavailable"))
+	called := false
+	handler := RateLimit(rdb, 5, time.Minute, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	req := httptest.NewRequest("POST", "/auth/send-code", nil)
+	req.RemoteAddr = "203.0.113.1:1234"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if called || rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Redis failure: called=%v status=%d", called, rec.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMemoryRateLimit_ExpiryAndCapacity(t *testing.T) {
+	now := time.Now()
+	m := &memoryRateLimit{entries: make(map[string]rateLimitEntry)}
+	if !m.allow("first", 1, time.Minute, now) || m.allow("first", 1, time.Minute, now) {
+		t.Fatal("limit not enforced")
+	}
+	if !m.allow("first", 1, time.Minute, now.Add(time.Minute)) {
+		t.Fatal("expired limit not reset")
+	}
+	for i := 0; i < 9999; i++ {
+		m.entries[fmt.Sprintf("bucket-%d", i)] = rateLimitEntry{expires: now.Add(2 * time.Minute)}
+	}
+	if m.allow("new", 1, time.Minute, now.Add(time.Minute)) {
+		t.Fatal("capacity must not evict active limits")
 	}
 }
 

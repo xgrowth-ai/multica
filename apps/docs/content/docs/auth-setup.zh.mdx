@@ -5,7 +5,7 @@ description: 配置邮箱验证码、Google 登录和新用户注册范围。
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica 默认使用邮箱验证码登录，也可以增加 Google OAuth。已经存在的用户始终可以再次登录；注册限制只决定是否允许创建新账号。
+Multica 默认使用邮箱验证码登录，也可以增加 Google OAuth。注册限制决定是否允许创建新账号；使用共享飞书验证码渠道时，邮箱名单也限制已有账号的登录。
 
 ## 邮箱验证码
 
@@ -57,9 +57,24 @@ SMTP_EHLO_NAME=mail.example.com
 
 ### 无邮件服务时的行为
 
-服务器仍可启动，但验证码和邀请链接只会写入日志，不会发送邮件。这适合本地开发，不适合生产环境。
+开发环境没有投递渠道时，验证码会写入日志。`APP_ENV=production` 时，邮箱登录会返回 503，不会将验证码写入日志；服务器和其他登录方式仍可使用。
 
 启动日志会说明当前使用的是 `Resend API`、`SMTP relay` 还是 `DEV mode`。
+
+### 可信内网的飞书渠道
+
+内部实例可以明确选择将验证码发送至可信飞书群：
+
+```dotenv
+VERIFICATION_CODE_DELIVERY=feishu
+FEISHU_VERIFICATION_WEBHOOK_URL=<HTTPS 机器人 webhook>
+ALLOW_SIGNUP=false
+ALLOWED_EMAILS=alice@example.com,bob@example.com
+```
+
+后端直接发送验证码，不将验证码写入日志。只有 `ALLOWED_EMAILS` 中的完整邮箱地址可以请求和验证验证码，已有账号也受此限制；域名名单不适用于该渠道。能读取验证码的群成员可以登录这些账号，因此群成员范围必须符合账号访问权限。没有 webhook 或邮箱名单为空时，投递会被禁用。
+
+没有 Redis 时，认证接口仍执行本机限流；使用 Redis 的实例在共享限流服务不可用时返回 503。发送验证码按邮箱串行执行，新验证码使旧验证码失效，每条验证码最多允许五次失败尝试和一次成功使用。
 
 ## 本地固定验证码
 

@@ -210,6 +210,9 @@ func (h *Handler) resolveAvatarURL(raw string) string {
 	if key == "" || avatarContentType(key) == "" {
 		return raw
 	}
+	if _, local := h.Storage.(*storage.LocalStorage); local {
+		return h.absolutizeAvatarPath(avatarURLPath(key))
+	}
 	if h.avatarObjectLoadsUnauthenticated(raw) {
 		return raw
 	}

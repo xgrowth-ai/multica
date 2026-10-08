@@ -273,6 +273,23 @@ func (s *LocalStorage) ServeFile(w http.ResponseWriter, r *http.Request, filenam
 		http.NotFound(w, r)
 		return
 	}
+	root, err := os.OpenRoot(s.uploadDir)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer root.Close()
+	file, err := root.Open(filename)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
 
 	filePath := filepath.Join(s.uploadDir, filename)
 	// filepath.Join cleans the path but doesn't enforce containment, so a
@@ -296,9 +313,9 @@ func (s *LocalStorage) ServeFile(w http.ResponseWriter, r *http.Request, filenam
 		w.Header().Set("Content-Disposition", ContentDisposition(meta.ContentType, meta.Filename))
 	}
 
-	// Use http.ServeFile which has built-in path traversal protection
-	// It sanitizes the path and prevents access outside the directory
-	http.ServeFile(w, r, filePath)
+	// Serve only the opened regular file; directories and escaping symlinks
+	// never reach the standard library's directory listing implementation.
+	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
 // isUnder reports whether target resolves to a path inside dir (or equal to

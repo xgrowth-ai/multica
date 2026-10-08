@@ -57,9 +57,9 @@ Host bindings:
 - Backend startup runs `./migrate up` before serving traffic.
 - Local uploads live in the `multica_backend_uploads` Docker volume unless S3 is configured.
 - Database data lives in `multica_pgdata`.
-- SMTP/Resend may be unset; in that mode codes appear in backend logs.
-- A host-level notifier forwards new development-mode verification-code log lines to Feishu. Its webhook is stored only in `/opt/multica/notifier/notifier.env`.
-- Redis may be unset for this single-node deployment; realtime then uses the in-memory hub and auth rate limiting is disabled.
+- Legacy v0.4.32 configurations without SMTP/Resend print codes in backend logs, which the host notifier forwards to Feishu. Preserve the notifier unit and its files during upgrades.
+- The security configuration uses `VERIFICATION_CODE_DELIVERY=feishu`, an HTTPS `FEISHU_VERIFICATION_WEBHOOK_URL`, and an exact `ALLOWED_EMAILS` list. The backend sends codes directly to the existing robot without logging them. Keep `ALLOW_SIGNUP=false`; group readers remain trusted to access the listed accounts.
+- Redis may be unset for this single-node deployment. The security code keeps authentication limits active with bounded in-memory counters. Set `RATE_LIMIT_TRUSTED_PROXIES` to the actual Docker gateway and loopback addresses behind host Nginx.
 - `/docs` may log connection refusal to port 4000 because the self-host stack does not include the separate docs app. Treat it as a docs-only issue, not main-app failure.
 
 ## Automated release
@@ -91,6 +91,23 @@ Important behavior:
 - Re-running `all` for the already-deployed tag performs verification without another backup or restart.
 
 The observational `scripts/check-production.sh` intentionally continues after public HTTP failures to show all layers. Do not use its exit status as release success; use the strict verifier.
+
+## Authentication incident containment
+
+The following scripts do not create tags or publish messages:
+
+```bash
+# Back up and reload Nginx: deny draft direct access and directory listings,
+# limit auth requests, and restrict auth request body size.
+bash .agents/skills/release-multica/scripts/harden-production-ingress.sh
+
+# Back up .env and Compose, prepare direct Feishu delivery from the existing
+# host notifier secret, and use existing accounts as the exact email list.
+# Does not restart services or activate the new backend delivery code.
+bash .agents/skills/release-multica/scripts/configure-feishu-verification.sh
+```
+
+The existing notifier stays active but receives no new code log lines after the security backend is deployed. Use the normal exact-tag release workflow to activate the application fix. Do not re-enable the raw `/uploads/design-drafts/` route: drafts use the isolated signed `/p/` preview route. Uploaded attachment objects require identity and workspace membership; avatars and native attachment downloads use their existing signed endpoints.
 
 ## Build and load fallback
 

@@ -1,14 +1,20 @@
 package service
 
 import (
+	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"mime"
 	"mime/quotedprintable"
 	"net"
+	"net/http"
 	"net/smtp"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -24,15 +30,19 @@ import (
 const maxSubjectFieldRunes = 60
 
 type EmailService struct {
-	client          *resend.Client
-	fromEmail       string
-	smtpHost        string
-	smtpPort        string
-	smtpUsername    string
-	smtpPassword    string
-	smtpTLSInsecure bool
-	smtpTLSImplicit bool
-	smtpEHLOName    string
+	client                    *resend.Client
+	fromEmail                 string
+	smtpHost                  string
+	smtpPort                  string
+	smtpUsername              string
+	smtpPassword              string
+	smtpTLSInsecure           bool
+	smtpTLSImplicit           bool
+	smtpEHLOName              string
+	verificationDelivery      string
+	verificationWebhook       string
+	verificationAllowedEmails map[string]struct{}
+	verificationHTTPClient    *http.Client
 }
 
 type smtpAuthClient interface {
@@ -185,6 +195,13 @@ func NewEmailService() *EmailService {
 	smtpPassword := os.Getenv("SMTP_PASSWORD")
 	smtpTLSInsecure := os.Getenv("SMTP_TLS_INSECURE") == "true"
 	from := resolveFromEmail(smtpHost)
+	delivery := strings.ToLower(strings.TrimSpace(os.Getenv("VERIFICATION_CODE_DELIVERY")))
+	allowedEmails := make(map[string]struct{})
+	for _, email := range strings.Split(os.Getenv("ALLOWED_EMAILS"), ",") {
+		if email = strings.ToLower(strings.TrimSpace(email)); email != "" {
+			allowedEmails[email] = struct{}{}
+		}
+	}
 
 	// EHLO/HELO name, only relevant on the SMTP relay send path. net/smtp defaults
 	// to "localhost", which strict relays (e.g. smtp-relay.gmail.com) reject from a
@@ -225,6 +242,8 @@ func NewEmailService() *EmailService {
 	}
 
 	switch {
+	case delivery == "feishu":
+		fmt.Println("EmailService: verification codes use the explicitly allowed Feishu channel")
 	case smtpHost != "":
 		tlsLabel := "starttls"
 		if smtpTLSImplicit {
@@ -234,19 +253,27 @@ func NewEmailService() *EmailService {
 	case client != nil:
 		fmt.Printf("EmailService: Resend API from=%s\n", from)
 	default:
-		fmt.Println("EmailService: DEV mode — codes printed to stdout (set MULTICA_DEV_VERIFICATION_CODE in .env for a fixed local code)")
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") {
+			fmt.Println("EmailService: no delivery provider configured; email login is unavailable")
+		} else {
+			fmt.Println("EmailService: DEV mode — codes printed to stdout")
+		}
 	}
 
 	return &EmailService{
-		client:          client,
-		fromEmail:       from,
-		smtpHost:        smtpHost,
-		smtpPort:        smtpPort,
-		smtpUsername:    smtpUsername,
-		smtpPassword:    smtpPassword,
-		smtpTLSInsecure: smtpTLSInsecure,
-		smtpTLSImplicit: smtpTLSImplicit,
-		smtpEHLOName:    smtpEHLOName,
+		client:                    client,
+		fromEmail:                 from,
+		smtpHost:                  smtpHost,
+		smtpPort:                  smtpPort,
+		smtpUsername:              smtpUsername,
+		smtpPassword:              smtpPassword,
+		smtpTLSInsecure:           smtpTLSInsecure,
+		smtpTLSImplicit:           smtpTLSImplicit,
+		smtpEHLOName:              smtpEHLOName,
+		verificationDelivery:      delivery,
+		verificationWebhook:       strings.TrimSpace(os.Getenv("FEISHU_VERIFICATION_WEBHOOK_URL")),
+		verificationAllowedEmails: allowedEmails,
+		verificationHTTPClient:    &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}
 }
 
@@ -334,10 +361,45 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	return c.Quit()
 }
 
-// SendVerificationCode sends a one-time login code. The code is server-generated
-// (6-digit numeric) so no user-controlled text reaches the email body here.
-// Delivery priority: SMTP relay → Resend API → DEV stdout.
-func (s *EmailService) SendVerificationCode(to, code string) error {
+// VerificationCodeDeliveryAvailable fails closed on missing production delivery
+// or on an incomplete shared-channel configuration.
+func (s *EmailService) VerificationCodeDeliveryAvailable() bool {
+	if s == nil {
+		return false
+	}
+	if s.verificationDelivery == "feishu" {
+		u, err := url.Parse(s.verificationWebhook)
+		return err == nil && u.Scheme == "https" && u.Host != "" && len(s.verificationAllowedEmails) > 0
+	}
+	if s.verificationDelivery != "" && s.verificationDelivery != "email" {
+		return false
+	}
+	return s.smtpHost != "" || s.client != nil ||
+		!strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+}
+
+// A shared notification channel cannot prove arbitrary mailbox ownership.
+// Explicit email entries gate both existing accounts and new registrations.
+func (s *EmailService) VerificationCodeEmailAllowed(email string) bool {
+	if s == nil || s.verificationDelivery != "feishu" {
+		return true
+	}
+	_, ok := s.verificationAllowedEmails[strings.ToLower(strings.TrimSpace(email))]
+	return ok
+}
+
+// SendVerificationCode sends a server-generated one-time login code. An explicit
+// Feishu channel takes precedence; otherwise use SMTP, Resend, or development stdout.
+func (s *EmailService) SendVerificationCode(ctx context.Context, to, code string) error {
+	if !s.VerificationCodeDeliveryAvailable() {
+		return fmt.Errorf("verification email delivery is not configured")
+	}
+	if !s.VerificationCodeEmailAllowed(to) {
+		return fmt.Errorf("verification email is not allowed")
+	}
+	if s.verificationDelivery == "feishu" {
+		return s.sendFeishuVerificationCode(ctx, to, code)
+	}
 	body := fmt.Sprintf(
 		`<div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
 			<h2>Your verification code</h2>
@@ -361,6 +423,39 @@ func (s *EmailService) SendVerificationCode(to, code string) error {
 	}
 	_, err := s.client.Emails.Send(params)
 	return err
+}
+
+func (s *EmailService) sendFeishuVerificationCode(ctx context.Context, to, code string) error {
+	payload := map[string]any{"msg_type": "text", "content": map[string]string{
+		"text": fmt.Sprintf("Multica 登录验证码\n邮箱：%s\n验证码：%s\n请勿转发给其他人。", to, code),
+	}}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to encode verification notification")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.verificationWebhook, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("invalid verification notification configuration")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.verificationHTTPClient.Do(req)
+	// Transport errors contain the webhook URL. Never propagate them to logs.
+	if err != nil {
+		return fmt.Errorf("verification notification delivery failed")
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Code       *int `json:"code"`
+		StatusCode *int `json:"StatusCode"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&result) != nil {
+		return fmt.Errorf("verification notification rejected")
+	}
+	if (result.Code == nil && result.StatusCode == nil) ||
+		(result.Code != nil && *result.Code != 0) || (result.StatusCode != nil && *result.StatusCode != 0) {
+		return fmt.Errorf("verification notification rejected")
+	}
+	return nil
 }
 
 // SendInvitationEmail notifies the invitee that they have been invited to a workspace.

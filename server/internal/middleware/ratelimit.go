@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -49,7 +50,8 @@ func ParseTrustedProxies(raw string) []*net.IPNet {
 }
 
 // RateLimit returns a per-IP fixed-window rate limiter backed by Redis.
-// If rdb is nil the middleware is a no-op (fail-open).
+// Single-node deployments use a bounded in-process limiter when Redis is absent.
+// Redis failures reject requests instead of bypassing authentication limits.
 //
 // trustedProxies controls X-Forwarded-For handling: when the direct
 // connection (RemoteAddr) originates from a CIDR in the list, the
@@ -58,22 +60,27 @@ func ParseTrustedProxies(raw string) []*net.IPNet {
 // RemoteAddr is used. This matches the project's conservative trust
 // model (see health_realtime.go).
 func RateLimit(rdb *redis.Client, limit int, window time.Duration, trustedProxies []*net.IPNet) func(http.Handler) http.Handler {
+	local := &memoryRateLimit{entries: make(map[string]rateLimitEntry)}
 	return func(next http.Handler) http.Handler {
-		if rdb == nil {
-			return next
-		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := extractIP(r, trustedProxies)
 			key := rateLimitKey(r.URL.Path, ip)
 			ctx := r.Context()
 
-			count, err := rateLimitScript.Run(ctx, rdb, []string{key}, int(window.Seconds())).Int64()
-			if err != nil {
-				slog.Warn("ratelimit: redis error; allowing request", "error", err, "ip", ip)
-				next.ServeHTTP(w, r)
-				return
+			var allowed bool
+			if rdb == nil {
+				allowed = local.allow(key, limit, window, time.Now())
+			} else {
+				count, err := rateLimitScript.Run(ctx, rdb, []string{key}, int(window.Seconds())).Int64()
+				if err != nil {
+					slog.Warn("ratelimit: Redis unavailable", "error", err)
+					w.Header().Set("Retry-After", "60")
+					http.Error(w, `{"error":"authentication rate limiter unavailable"}`, http.StatusServiceUnavailable)
+					return
+				}
+				allowed = count <= int64(limit)
 			}
-			if count > int64(limit) {
+			if !allowed {
 				w.Header().Set("Retry-After", fmt.Sprintf("%d", int(window.Seconds())))
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
@@ -84,6 +91,44 @@ func RateLimit(rdb *redis.Client, limit int, window time.Duration, trustedProxie
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+type rateLimitEntry struct {
+	count   int
+	expires time.Time
+}
+
+type memoryRateLimit struct {
+	mu          sync.Mutex
+	entries     map[string]rateLimitEntry
+	nextCleanup time.Time
+}
+
+func (m *memoryRateLimit) allow(key string, limit int, window time.Duration, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !now.Before(m.nextCleanup) {
+		for k, entry := range m.entries {
+			if !now.Before(entry.expires) {
+				delete(m.entries, k)
+			}
+		}
+		m.nextCleanup = now.Add(window)
+	}
+	entry, exists := m.entries[key]
+	if !exists || !now.Before(entry.expires) {
+		// Reject new buckets at capacity rather than evicting active limits.
+		if !exists && len(m.entries) >= 10000 {
+			return false
+		}
+		entry = rateLimitEntry{expires: now.Add(window)}
+	}
+	if entry.count >= limit {
+		return false
+	}
+	entry.count++
+	m.entries[key] = entry
+	return true
 }
 
 // extractIP determines the client IP for rate limiting purposes.

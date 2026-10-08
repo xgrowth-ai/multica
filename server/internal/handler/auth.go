@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"os"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
@@ -275,16 +277,65 @@ func contains(slice []string, s string) bool {
 	return false
 }
 
+func normalizeLoginEmail(raw string) (string, bool) {
+	if strings.ContainsAny(raw, "\r\n\x00") {
+		return "", false
+	}
+	email := strings.ToLower(strings.TrimSpace(raw))
+	if len(email) == 0 || len(email) > 254 {
+		return "", false
+	}
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Name != "" || address.Address != email {
+		return "", false
+	}
+	local, domain, ok := strings.Cut(email, "@")
+	if !ok || len(local) > 64 || len(domain) > 253 {
+		return "", false
+	}
+	return email, true
+}
+
+func decodeLoginRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	decoder := json.NewDecoder(r.Body)
+	if decoder.Decode(dst) != nil || decoder.Decode(new(any)) != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return false
+	}
+	return true
+}
+
+// Both issuance and consumption hold the same transaction-scoped email lock.
+// This also serializes first issuance, when no verification row exists yet.
+func (h *Handler) beginVerificationCodeTx(ctx context.Context, email string) (pgx.Tx, *db.Queries, error) {
+	if h.TxStarter == nil {
+		return nil, nil, errors.New("verification transaction unavailable")
+	}
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	queries := h.Queries.WithTx(tx)
+	if err := queries.LockVerificationCodeEmail(ctx, email); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, nil, err
+	}
+	return tx, queries, nil
+}
+
 func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	var req SendCodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !decodeLoginRequest(w, r, &req) {
 		return
 	}
-
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if email == "" {
-		writeError(w, http.StatusBadRequest, "email is required")
+	email, valid := normalizeLoginEmail(req.Email)
+	if !valid {
+		writeError(w, http.StatusBadRequest, "a valid email address is required")
+		return
+	}
+	if !h.EmailService.VerificationCodeEmailAllowed(email) {
+		writeError(w, http.StatusForbidden, "email address is not allowed on this instance")
 		return
 	}
 	if auth.IsTemporarilyDisabledUserEmail(email) {
@@ -330,8 +381,22 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Rate limit: max 1 code per 60 seconds per email
-	latest, err := h.Queries.GetLatestCodeByEmail(r.Context(), email)
+	if !h.EmailService.VerificationCodeDeliveryAvailable() {
+		writeError(w, http.StatusServiceUnavailable, "email login is not configured")
+		return
+	}
+	tx, queries, err := h.beginVerificationCodeTx(r.Context(), email)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare verification code")
+		return
+	}
+	defer tx.Rollback(context.Background())
+	// Rate limit: max 1 code per 60 seconds per email, including concurrent sends.
+	latest, err := queries.GetLatestCodeByEmail(r.Context(), email)
+	if err != nil && !isNotFound(err) {
+		writeError(w, http.StatusInternalServerError, "failed to lookup verification code")
+		return
+	}
 	if err == nil && time.Since(latest.CreatedAt.Time) < 60*time.Second {
 		writeError(w, http.StatusTooManyRequests, "please wait before requesting another code")
 		return
@@ -343,7 +408,11 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.Queries.CreateVerificationCode(r.Context(), db.CreateVerificationCodeParams{
+	if err := queries.InvalidateVerificationCodesByEmail(r.Context(), email); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to invalidate verification codes")
+		return
+	}
+	_, err = queries.CreateVerificationCode(r.Context(), db.CreateVerificationCodeParams{
 		Email:     email,
 		Code:      code,
 		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(10 * time.Minute), Valid: true},
@@ -353,9 +422,13 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.EmailService.SendVerificationCode(email, code); err != nil {
+	if err := h.EmailService.SendVerificationCode(r.Context(), email, code); err != nil {
 		slog.Error("failed to send verification code", "email", email, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to send verification code")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to store verification code")
 		return
 	}
 
@@ -367,16 +440,19 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	var req VerifyCodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !decodeLoginRequest(w, r, &req) {
 		return
 	}
 
-	email := strings.ToLower(strings.TrimSpace(req.Email))
+	email, valid := normalizeLoginEmail(req.Email)
 	code := strings.TrimSpace(req.Code)
 
-	if email == "" || code == "" {
-		writeError(w, http.StatusBadRequest, "email and code are required")
+	if !valid || !isSixDigitCode(code) {
+		writeError(w, http.StatusBadRequest, "a valid email address and six-digit code are required")
+		return
+	}
+	if !h.EmailService.VerificationCodeEmailAllowed(email) {
+		writeError(w, http.StatusForbidden, "email address is not allowed on this instance")
 		return
 	}
 	if auth.IsTemporarilyDisabledUserEmail(email) {
@@ -384,20 +460,41 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbCode, err := h.Queries.GetLatestVerificationCode(r.Context(), email)
+	tx, queries, err := h.beginVerificationCodeTx(r.Context(), email)
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare verification")
+		return
+	}
+	defer tx.Rollback(context.Background())
+	dbCode, err := queries.GetLatestVerificationCode(r.Context(), email)
+	if err != nil {
+		if !isNotFound(err) {
+			writeError(w, http.StatusInternalServerError, "failed to lookup verification code")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
 		return
 	}
 
 	isDevCode := isDevVerificationCode(code)
 	if !isDevCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
-		_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
+		if err := queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update verification attempts")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update verification attempts")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
 		return
 	}
 
-	if err := h.Queries.MarkVerificationCodeUsed(r.Context(), dbCode.ID); err != nil {
+	if err := queries.MarkVerificationCodeUsed(r.Context(), dbCode.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to verify code")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to verify code")
 		return
 	}

@@ -71,13 +71,13 @@ func (q *Queries) GetLatestCodeByEmail(ctx context.Context, email string) (Verif
 }
 
 const getLatestVerificationCode = `-- name: GetLatestVerificationCode :one
-SELECT id, email, code, expires_at, used, created_at, attempts FROM verification_code
-WHERE email = $1
-  AND used = FALSE
+SELECT id, email, code, expires_at, used, created_at, attempts FROM (
+  SELECT id, email, code, expires_at, used, created_at, attempts FROM verification_code WHERE email = $1
+  ORDER BY created_at DESC, id DESC LIMIT 1
+) AS latest
+WHERE used = FALSE
   AND expires_at > now()
   AND attempts < 5
-ORDER BY created_at DESC
-LIMIT 1
 `
 
 func (q *Queries) GetLatestVerificationCode(ctx context.Context, email string) (VerificationCode, error) {
@@ -103,6 +103,24 @@ WHERE id = $1
 
 func (q *Queries) IncrementVerificationCodeAttempts(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, incrementVerificationCodeAttempts, id)
+	return err
+}
+
+const invalidateVerificationCodesByEmail = `-- name: InvalidateVerificationCodesByEmail :exec
+UPDATE verification_code SET used = TRUE WHERE email = $1 AND used = FALSE
+`
+
+func (q *Queries) InvalidateVerificationCodesByEmail(ctx context.Context, email string) error {
+	_, err := q.db.Exec(ctx, invalidateVerificationCodesByEmail, email)
+	return err
+}
+
+const lockVerificationCodeEmail = `-- name: LockVerificationCodeEmail :exec
+SELECT pg_advisory_xact_lock(hashtextextended('multica-verification:' || $1::text, 0))
+`
+
+func (q *Queries) LockVerificationCodeEmail(ctx context.Context, email string) error {
+	_, err := q.db.Exec(ctx, lockVerificationCodeEmail, email)
 	return err
 }
 

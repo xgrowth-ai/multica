@@ -933,21 +933,51 @@ func shouldProxyAttachmentURL(rawURL string) bool {
 	return false
 }
 
-// ServeLocalUpload serves a local-disk object from the public /uploads/*
-// route. It carries the same preview security headers as the authenticated
-// download endpoint so self-hosted deployments — same-origin or split
-// frontend/backend origins — can inline-render images and iframe-preview
-// documents (PDF/HTML) fetched straight from the static route. Without these
-// headers the global "frame-ancestors 'none'" policy blocks those previews.
-// See MUL-3821 / #4477.
+// ServeLocalUpload serves authenticated local objects after enforcing workspace
+// membership or per-user ownership. Drafts use the isolated signed preview
+// endpoint. Regular files retain the attachment preview security headers.
 func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
 	local, ok := h.Storage.(*storage.LocalStorage)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	h.setAttachmentPreviewSecurityHeaders(w)
 	key := strings.TrimPrefix(r.URL.Path, "/uploads/")
+	parts := strings.Split(key, "/")
+	// Drafts must use the isolated, signed /p/ preview route. Unknown and
+	// legacy namespaces fail closed instead of becoming a public file API.
+	if len(parts) < 3 || strings.Contains(key, "\\") {
+		http.NotFound(w, r)
+		return
+	}
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			http.NotFound(w, r)
+			return
+		}
+	}
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	switch parts[0] {
+	case "workspaces":
+		if _, err := h.getWorkspaceMember(r.Context(), userID, parts[1]); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+	case "users":
+		if parts[1] != userID {
+			http.NotFound(w, r)
+			return
+		}
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	h.setAttachmentPreviewSecurityHeaders(w)
+	w.Header().Set("Cache-Control", "private, no-store")
 	local.ServeFile(w, r, key)
 }
 

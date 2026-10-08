@@ -4,13 +4,19 @@ VALUES ($1, $2, $3)
 RETURNING *;
 
 -- name: GetLatestVerificationCode :one
-SELECT * FROM verification_code
-WHERE email = $1
-  AND used = FALSE
+SELECT * FROM (
+  SELECT * FROM verification_code WHERE email = $1
+  ORDER BY created_at DESC, id DESC LIMIT 1
+) AS latest
+WHERE used = FALSE
   AND expires_at > now()
-  AND attempts < 5
-ORDER BY created_at DESC
-LIMIT 1;
+  AND attempts < 5;
+
+-- name: LockVerificationCodeEmail :exec
+SELECT pg_advisory_xact_lock(hashtextextended('multica-verification:' || sqlc.arg(email)::text, 0));
+
+-- name: InvalidateVerificationCodesByEmail :exec
+UPDATE verification_code SET used = TRUE WHERE email = $1 AND used = FALSE;
 
 -- name: MarkVerificationCodeUsed :exec
 UPDATE verification_code

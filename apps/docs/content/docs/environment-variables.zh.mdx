@@ -20,7 +20,7 @@ MULTICA_APP_URL=https://multica.example.com
 MULTICA_PUBLIC_URL=https://api.multica.example.com
 ```
 
-还需要选择一种邮件服务，否则验证码和邀请只会写入服务端日志。
+生产环境的邮箱登录需要投递渠道。内部实例也可以明确配置可信飞书群和完整邮箱名单，具体见[登录与注册配置](/auth-setup)。
 
 <Callout type="warning">
 不要在生产环境使用默认的 `JWT_SECRET`，也不要设置 `MULTICA_DEV_VERIFICATION_CODE`。

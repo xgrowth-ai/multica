@@ -20,7 +20,7 @@ MULTICA_APP_URL=https://multica.example.com
 MULTICA_PUBLIC_URL=https://api.multica.example.com
 ```
 
-You also need to pick an email service, otherwise verification codes and invitations are only written to the server log.
+Production email login requires a delivery provider. A trusted internal Feishu channel can be explicitly configured with an exact email allowlist; see [sign-in setup](/auth-setup).
 
 <Callout type="warning">
 Do not use the default `JWT_SECRET` in production, and do not set `MULTICA_DEV_VERIFICATION_CODE`.

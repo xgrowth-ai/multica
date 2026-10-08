@@ -1234,14 +1234,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
 
-	// Local file serving (when using local storage). Served through the
-	// handler so /uploads/* carries the same preview security headers as the
-	// /api/attachments download endpoint; self-hosted split-origin/same-origin
-	// clients can then iframe-preview PDFs/HTML fetched straight from the
-	// static route instead of hitting the global frame-ancestors 'none' CSP.
-	// See MUL-3821 / #4477.
+	// Local objects require identity; the handler checks namespace ownership.
+	// Native clients use signed attachment and avatar endpoints for resource
+	// loads that cannot carry a cookie or Authorization header.
 	if _, ok := store.(*storage.LocalStorage); ok {
-		r.Get("/uploads/*", h.ServeLocalUpload)
+		r.With(middleware.Auth(queries, patCache, cloudPATVerifier)).Get("/uploads/*", h.ServeLocalUpload)
 	}
 	r.Get("/p/{token}/*", h.ServeDesignDraftPreview)
 
@@ -1267,7 +1264,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Auth (public) — per-IP rate limiting.
 	if rdb == nil {
-		slog.Warn("auth rate limiting disabled: REDIS_URL not configured")
+		slog.Info("auth rate limiting uses bounded in-memory counters (single-node mode)")
 	}
 	trustedProxies := middleware.ParseTrustedProxies(os.Getenv("RATE_LIMIT_TRUSTED_PROXIES"))
 	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
