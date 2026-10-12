@@ -1,4 +1,5 @@
-import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { api } from "../api";
 import type { TaskMessagePayload } from "../types/events";
 import type {
@@ -213,6 +214,26 @@ export function taskMessagesOptions(taskId: string) {
   });
 }
 
+/** A visible run follows WS updates and backfills on mount and completion. */
+export function useTaskMessages(taskId: string, isLive: boolean, enabled = true) {
+  const query = useQuery({
+    ...taskMessagesOptions(taskId),
+    enabled: enabled && isTaskMessageTaskId(taskId),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+  });
+  const previous = useRef({ isLive, enabled });
+  const { refetch } = query;
+  useEffect(() => {
+    if (enabled && isTaskMessageTaskId(taskId)
+      && (!previous.current.enabled || (previous.current.isLive && !isLive))) {
+      void refetch({ cancelRefetch: false });
+    }
+    previous.current = { isLive, enabled };
+  }, [taskId, isLive, enabled, refetch]);
+  return query;
+}
+
 /**
  * Merge task-message batches into one seq-ordered, seq-deduplicated list for
  * the shared `["task-messages", taskId]` cache. Existing entries win on
@@ -249,10 +270,9 @@ export function mergeTaskMessagesBySeq(
  * plain replace would drop those seqs, and `staleTime: Infinity` means nothing
  * would ever refetch them — the gap would survive until a reload.
  *
- * Server data wins on conflict because the persisted row is the authority: a
- * broadcast copy may have been clipped for the fanout, and the fetched row
- * never is. Rows the response did not mention are kept rather than deleted —
- * a response snapshotted before a seq was persisted must not erase it.
+ * Server data wins on conflict because the persisted row is the authority.
+ * Rows the response did not mention are kept rather than deleted — a response
+ * snapshotted before a seq was persisted must not erase it.
  *
  * The `base` reference is returned unchanged when nothing differs, so an event
  * that adds nothing does not re-render every subscriber.
@@ -305,28 +325,6 @@ export function isTaskMessageTimelineHeld(
   taskId: string,
 ): boolean {
   return qc.getQueryCache().find({ queryKey: chatKeys.taskMessages(taskId) }) !== undefined;
-}
-
-/**
- * Refetch a task's full timeline and fold it into the cache.
- *
- * Used when a broadcast frame arrived `truncated`: the live copy carries
- * clipped tool input/output and the full text exists only in the DB. Writing
- * the fetched rows straight in is enough — `unionTaskMessagesBySeq`, installed
- * as the query's `structuralSharing`, is what makes the fetched row replace the
- * clipped one while keeping any seq the response had not yet seen.
- */
-export async function backfillTaskMessages(
-  qc: QueryClient,
-  taskId: string,
-): Promise<void> {
-  if (!isTaskMessageTaskId(taskId)) return;
-  const msgs = await api.listTaskMessages(taskId);
-  // The entry can be collected while this request is open. Writing anyway
-  // would rebuild a timeline nothing is watching, re-arming another gcTime of
-  // accumulation for a task the user has already closed.
-  if (!isTaskMessageTimelineHeld(qc, taskId)) return;
-  qc.setQueryData<TaskMessagePayload[]>(chatKeys.taskMessages(taskId), msgs);
 }
 
 /**

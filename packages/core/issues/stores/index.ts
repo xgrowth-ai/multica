@@ -26,7 +26,7 @@ export {
   useResolvedExpandStore,
   selectExpandedResolved,
 } from "./resolved-expand-store";
-export { useCommentComposerStore } from "./comment-composer-store";
+export { useCommentComposerStore, type RunningAgentReply } from "./comment-composer-store";
 export { useIssueDetailOpenStore } from "./issue-detail-open-store";
 export { useCommentDraftStore, type CommentDraftKey } from "./comment-draft-store";
 export {

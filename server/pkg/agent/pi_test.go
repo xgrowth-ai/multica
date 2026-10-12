@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -29,7 +31,7 @@ func TestBuildPiArgsBasicFlags(t *testing.T) {
 	}, slog.Default())
 
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"-p", "--mode json", "--session /tmp/s.jsonl", "--provider anthropic", "--model claude-sonnet-4-20250514", "--thinking high"} {
+	for _, want := range []string{"-p", "--mode json", "--session /tmp/s.jsonl", "--model anthropic/claude-sonnet-4-20250514", "--thinking high"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected %q in args, got: %v", want, args)
 		}
@@ -160,6 +162,54 @@ func TestPiExecuteRejectsEmptyPrompt(t *testing.T) {
 	}
 }
 
+func TestPiExecuteRejectsConcurrentSessionWriter(t *testing.T) {
+	t.Parallel()
+
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("create session file: %v", err)
+	}
+	claim, locked, err := tryLockPiSessionFile(sessionPath)
+	if err != nil {
+		t.Fatalf("lock session file: %v", err)
+	}
+	if !locked {
+		t.Fatal("first session-file lock was unexpectedly busy")
+	}
+	defer releasePiSessionFileLock(claim)
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate test executable: %v", err)
+	}
+	backend, err := New("pi", Config{ExecutablePath: executable, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("New(pi): %v", err)
+	}
+	session, err := backend.Execute(t.Context(), "follow-up", ExecOptions{ResumeSessionID: sessionPath})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "failed" || !result.ResumeRejectedTransient {
+		t.Fatalf("result = %+v, want failed ResumeRejectedTransient", result)
+	}
+	if result.ResumeRejected {
+		t.Fatal("a busy session is still healthy and must not be permanently rejected")
+	}
+	if result.SessionID != "" {
+		t.Fatalf("SessionID = %q, want empty so the live transcript is not republished", result.SessionID)
+	}
+	if !strings.Contains(result.Error, "already in use") {
+		t.Fatalf("error = %q, want session-in-use diagnostic", result.Error)
+	}
+}
+
 // TestPiExecuteAttachesStdinPipe verifies that the Pi backend spawns the child
 // with an explicit stdin pipe, writes the task prompt, and closes it. Closing
 // delivers both the end-of-prompt signal and the EOF that keeps Pi from
@@ -224,11 +274,26 @@ func TestPiExecuteAttachesStdinPipe(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
 	}
+	claim, locked, err := tryLockPiSessionFile(sessionPath)
+	if err != nil {
+		t.Fatalf("lock completed session: %v", err)
+	}
+	if !locked {
+		t.Fatal("Pi backend returned its result before releasing the session-file lock")
+	}
+	releasePiSessionFileLock(claim)
 }
 
 // piEventStreamScript builds a sh script that prints each JSON event on
 // its own stdout line. Fixtures must not contain single quotes.
 func piEventStreamScript(events []string) string {
+	return piEventStreamScriptWithExit(events, 0)
+}
+
+// piEventStreamScriptWithExit is piEventStreamScript plus an explicit
+// process exit code. Real Pi (and pi-print-clean-exit) exits 1 after a
+// turn whose last assistant stopReason is "error".
+func piEventStreamScriptWithExit(events []string, exitCode int) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	// Real Pi reads the piped prompt to EOF before emitting events, so the fake
@@ -242,7 +307,246 @@ func piEventStreamScript(events []string) string {
 		b.WriteString(e)
 		b.WriteString("'\n")
 	}
+	if exitCode != 0 {
+		b.WriteString(fmt.Sprintf("exit %d\n", exitCode))
+	}
 	return b.String()
+}
+
+func newPiTestBackend(t *testing.T, script string, turnErrorGrace time.Duration) *piBackend {
+	t.Helper()
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	pi, ok := backend.(*piBackend)
+	if !ok {
+		t.Fatalf("New(pi) returned %T, want *piBackend", backend)
+	}
+	pi.turnErrorGrace = turnErrorGrace
+	return pi
+}
+
+func waitPiResult(t *testing.T, session *Session, timeout time.Duration) Result {
+	t.Helper()
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		return result
+	case <-time.After(timeout):
+		t.Fatal("timeout waiting for Pi result")
+		return Result{}
+	}
+}
+
+func TestPiExecutePreservesTurnErrorWhenCancelled(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const providerError = "OpenAI API error (413): Failed to buffer the request body: length limit exceeded"
+	script := piEventStreamScript([]string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"` + providerError + `"}}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"post-error activity"}}`,
+	}) + "exec sleep 300\n"
+	backend := newPiTestBackend(t, script, time.Minute)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl"),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for msg := range session.Messages {
+		if msg.Type == MessageThinking && msg.Content == "post-error activity" {
+			cancel()
+			break
+		}
+	}
+
+	result := waitPiResult(t, session, 5*time.Second)
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed (error=%q)", result.Status, result.Error)
+	}
+	if result.Error != providerError {
+		t.Fatalf("error = %q, want original provider error %q", result.Error, providerError)
+	}
+}
+
+func TestPiExecuteCancellationWithoutTurnErrorKeepsAbortedResult(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	script := piEventStreamScript([]string{`{"type":"agent_start"}`}) + "exec sleep 300\n"
+	backend := newPiTestBackend(t, script, 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl"),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for msg := range session.Messages {
+		if msg.Type == MessageStatus {
+			cancel()
+			break
+		}
+	}
+
+	result := waitPiResult(t, session, 5*time.Second)
+	if result.Status != "aborted" || result.Error != "execution cancelled" {
+		t.Fatalf("result = %+v, want the existing no-error cancellation result", result)
+	}
+}
+
+func TestPiExecuteEndsSilentTurnErrorAfterGraceOnce(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const providerError = "OpenAI API error (413): request body too large"
+	const grace = 80 * time.Millisecond
+	script := piEventStreamScript([]string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"` + providerError + `"}}`,
+		`{"type":"agent_end","messages":[],"willRetry":false}`,
+	}) + "exec sleep 300\n"
+	backend := newPiTestBackend(t, script, grace)
+
+	started := time.Now()
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{
+		Timeout:         15 * time.Second,
+		ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl"),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	result := waitPiResult(t, session, 20*time.Second)
+	if result.Status != "failed" || result.Error != providerError {
+		t.Fatalf("result = %+v, want one failed result with the provider error", result)
+	}
+	for msg := range session.Messages {
+		if msg.Type == MessageError {
+			t.Fatalf("turn-error grace emitted an error message and would refresh the daemon watchdog: %+v", msg)
+		}
+	}
+	if elapsed := time.Since(started); elapsed < grace/2 || elapsed > 10*time.Second {
+		t.Fatalf("error grace ended after %s, want approximately %s", elapsed, grace)
+	}
+	if _, ok := <-session.Result; ok {
+		t.Fatal("result channel produced more than one terminal result")
+	}
+}
+
+func TestPiExecuteTurnErrorActivityAndRetryRecoveryCancelTimer(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const grace = 100 * time.Millisecond
+	script := "#!/bin/sh\n" +
+		"cat > /dev/null\n" +
+		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"temporary provider error"}}'` + "\n" +
+		"sleep 0.06\n" +
+		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"retrying"}}'` + "\n" +
+		"sleep 0.06\n" +
+		`printf '%s\n' '{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":1}'` + "\n" +
+		"sleep 0.15\n" +
+		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"recovered"}}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test"}}'` + "\n"
+	backend := newPiTestBackend(t, script, grace)
+
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{
+		Timeout:         15 * time.Second,
+		ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl"),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	result := waitPiResult(t, session, 20*time.Second)
+	if result.Status != "completed" || result.Output != "recovered" || result.Error != "" {
+		t.Fatalf("result = %+v, want successful recovered turn", result)
+	}
+}
+
+func TestPiExecuteTurnErrorGraceWaitsForInFlightTool(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const grace = 60 * time.Millisecond
+	script := "#!/bin/sh\n" +
+		"cat > /dev/null\n" +
+		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"tool_execution_start","toolCallId":"call-1","toolName":"bash","args":{}}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"temporary provider error"}}'` + "\n" +
+		"sleep 0.15\n" +
+		`printf '%s\n' '{"type":"tool_execution_end","toolCallId":"call-1","toolName":"bash","result":"ok"}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"done"}}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test"}}'` + "\n"
+	backend := newPiTestBackend(t, script, grace)
+
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{
+		Timeout:         15 * time.Second,
+		ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl"),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	result := waitPiResult(t, session, 20*time.Second)
+	if result.Status != "completed" || result.Output != "done" {
+		t.Fatalf("result = %+v, want tool completion and recovered turn", result)
+	}
+}
+
+func TestPiExecuteNormalSilenceDoesNotArmTurnErrorGrace(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const grace = 50 * time.Millisecond
+	script := "#!/bin/sh\n" +
+		"cat > /dev/null\n" +
+		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
+		"sleep 0.15\n" +
+		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
+		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"healthy"}}'` + "\n" +
+		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test"}}'` + "\n"
+	backend := newPiTestBackend(t, script, grace)
+
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{
+		Timeout:         15 * time.Second,
+		ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl"),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	result := waitPiResult(t, session, 20*time.Second)
+	if result.Status != "completed" || result.Output != "healthy" {
+		t.Fatalf("result = %+v, want normal silent run to complete", result)
+	}
 }
 
 // TestPiExecuteRetainsOnlyLastTurnOutput verifies turn_start resets the
@@ -351,13 +655,14 @@ func TestPiExecuteSucceedsWhenRetryFollowsTurnError(t *testing.T) {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 
-	// The same stopReason=error precedes an automatic retry. The retry
-	// succeeds, so the run must not inherit the first turn's failure.
+	// The same stopReason=error precedes an automatic retry, on turn_end and
+	// again on agent_end. The retry succeeds, so the run must not inherit the
+	// first turn's failure.
 	events := []string{
 		`{"type":"agent_start"}`,
 		`{"type":"turn_start"}`,
 		`{"type":"turn_end","message":{"role":"assistant","content":[],"model":"test","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"OpenAI API error (503): no available channel"}}`,
-		`{"type":"agent_end","messages":[],"willRetry":true}`,
+		`{"type":"agent_end","messages":[{"role":"assistant","content":[],"model":"test","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"OpenAI API error (503): no available channel"}],"willRetry":true}`,
 		`{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":1}`,
 		`{"type":"agent_start"}`,
 		`{"type":"turn_start"}`,
@@ -393,6 +698,204 @@ func TestPiExecuteSucceedsWhenRetryFollowsTurnError(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestPiExecuteKeepsTurnErrorWhenProcessExitsNonZero(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Real Pi (and pi-print-clean-exit) exits 1 after stopReason=error.
+	// Wait() used to win the completed-branch and drop lastTurnError, so
+	// the classifier only saw "exit status 1" (non-retryable
+	// process_failure). The provider message must survive so
+	// "Connection error." / "Request timed out." classify as
+	// provider_network.
+	events := []string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"turn_end","message":{"role":"assistant","content":[],"model":"test","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"Connection error."}}`,
+		`{"type":"agent_end","messages":[],"willRetry":false}`,
+	}
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte(piEventStreamScriptWithExit(events, 1)))
+
+	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "Connection error.") {
+			t.Fatalf("Error: got %q, want it to carry the provider message", result.Error)
+		}
+		if !strings.Contains(result.Error, "exited with error") {
+			t.Fatalf("Error: got %q, want the process exit still visible as a suffix", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// piKeyErrorAgentEnd is the agent_end Pi 0.74.0 emits when the provider's API
+// key command fails: one empty assistant message, and nothing else reports it.
+const piKeyErrorAgentEnd = `{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":""}],"model":"test","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0},"stopReason":"error","errorMessage":"Failed to resolve API key for provider \"gateway\" from shell command: key-helper"}]}`
+
+func TestPiExecuteFailsOnAgentEndOnlyError(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// A failure raised before the first model call reaches the stream only on
+	// agent_end: no turn_end, no error event, no auto_retry_end, exit 0.
+	tests := []struct {
+		name     string
+		agentEnd string
+		want     string
+	}{
+		{
+			name:     "provider message",
+			agentEnd: piKeyErrorAgentEnd,
+			want:     `Failed to resolve API key for provider "gateway" from shell command: key-helper`,
+		},
+		{
+			name:     "empty message",
+			agentEnd: `{"type":"agent_end","messages":[{"role":"assistant","content":[],"model":"test","stopReason":"error"}]}`,
+			want:     "pi ended the run with an error",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			script := piEventStreamScript([]string{
+				`{"type":"agent_start"}`,
+				`{"type":"turn_start"}`,
+				`{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"prompt"}]}}`,
+				`{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"prompt"}]}}`,
+				tt.agentEnd,
+			})
+			backend := newPiTestBackend(t, script, 0)
+			session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{
+				Timeout:         5 * time.Second,
+				ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl"),
+			})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+
+			result := waitPiResult(t, session, 10*time.Second)
+			if result.Status != "failed" || result.Error != tt.want {
+				t.Fatalf("result = {Status:%q Error:%q}, want failed with %q", result.Status, result.Error, tt.want)
+			}
+		})
+	}
+}
+
+func TestPiExecuteFailsOnAgentEndErrorAfterToolWork(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Pi resolves the API key again for every model request, so a key that
+	// stops resolving mid-run fails the next turn after real work. That turn
+	// starts and then only agent_end reports the failure.
+	script := piEventStreamScript([]string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Checking."}}`,
+		`{"type":"tool_execution_start","toolCallId":"call_1","toolName":"bash","args":{"command":"echo hi"}}`,
+		`{"type":"tool_execution_end","toolCallId":"call_1","toolName":"bash","result":{"content":[{"type":"text","text":"hi"}]},"isError":false}`,
+		`{"type":"turn_end","message":{"role":"assistant","content":[],"model":"test","usage":{"input":5,"output":3,"cacheRead":0,"cacheWrite":0,"totalTokens":8},"stopReason":"toolUse"}}`,
+		`{"type":"turn_start"}`,
+		piKeyErrorAgentEnd,
+	})
+	backend := newPiTestBackend(t, script, 0)
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl"),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := waitPiResult(t, session, 10*time.Second)
+	want := `Failed to resolve API key for provider "gateway" from shell command: key-helper`
+	if result.Status != "failed" || result.Error != want {
+		t.Fatalf("result = {Status:%q Error:%q}, want failed with %q", result.Status, result.Error, want)
+	}
+	if got := result.Usage["test"]; got.InputTokens != 5 || got.OutputTokens != 3 {
+		t.Fatalf("Usage[test] = %+v, want the completed turn's usage kept", got)
+	}
+}
+
+func TestPiExecuteFailsOnScannerOverflow(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// agent_end repeats every message of the run, so on a long run it is the
+	// line most likely to outgrow the shared bound. Once the scanner stops, the
+	// run's terminal state is unknown and must not read as success. The line is
+	// sized from agentStreamMaxLineBytes so raising the cap keeps this test on
+	// the overflow branch.
+	script := piEventStreamScript([]string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"done"}}`,
+		`{"type":"turn_end","message":{"role":"assistant","model":"test","usage":{"input":1,"output":1}}}`,
+	}) + fmt.Sprintf("dd if=/dev/zero bs=1048576 count=%d 2>/dev/null | tr '\\000' x\nprintf '\\n'\n",
+		agentStreamMaxLineBytes/(1024*1024)+1)
+	backend := newPiTestBackend(t, script, 0)
+	// A generous timeout: without the fix this run hangs until it expires, and
+	// a loaded host must not turn the fixed run into a timeout either.
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{
+		Timeout:         30 * time.Second,
+		ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl"),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := waitPiResult(t, session, 40*time.Second)
+	if result.Status != "failed" {
+		t.Fatalf("result = {Status:%q Error:%q}, want failed", result.Status, result.Error)
+	}
+	for _, want := range []string{"pi stdout read error", "token too long"} {
+		if !strings.Contains(result.Error, want) {
+			t.Errorf("Error = %q, want substring %q", result.Error, want)
+		}
 	}
 }
 
@@ -455,6 +958,58 @@ func TestFlushPiTextBufferKeepsUnmatchedToolPrefixes(t *testing.T) {
 		got += flushPiTextBuffer(&buf)
 		if got != want {
 			t.Fatalf("unexpected flushed text: %q, want %q", got, want)
+		}
+	}
+}
+
+// TestBuildPiArgsKeepsSlashShapedModelIDIntact is the GH #7300 regression.
+// A gateway-style provider registers model ids that themselves contain a
+// slash (`claude/claude-opus-5` under provider `multica-anthropic`). Splitting
+// on that slash to fill --provider produced `--provider claude --model
+// claude-opus-5`, and pi answers an unknown --provider with a hard
+// `Unknown provider "claude"` before it ever looks at --model. The whole
+// selector must reach --model instead, where pi's resolver matches it as a
+// raw model id.
+func TestBuildPiArgsKeepsSlashShapedModelIDIntact(t *testing.T) {
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{Model: "claude/claude-opus-5"}, slog.Default())
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--model claude/claude-opus-5") {
+		t.Errorf("model id was not passed through intact: %v", args)
+	}
+	for _, arg := range args {
+		if arg == "--provider" {
+			t.Errorf("buildPiArgs synthesized --provider from a model id: %v", args)
+		}
+	}
+}
+
+// A fully-qualified selector is passed through the same way: pi infers the
+// provider from the prefix itself, so the daemon never has to take it apart.
+func TestBuildPiArgsPassesQualifiedSelectorWhole(t *testing.T) {
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{Model: "multica-anthropic/claude/claude-opus-5"}, slog.Default())
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--model multica-anthropic/claude/claude-opus-5") {
+		t.Errorf("qualified selector was not passed through intact: %v", args)
+	}
+	if strings.Contains(joined, "--provider") {
+		t.Errorf("buildPiArgs synthesized --provider: %v", args)
+	}
+}
+
+// A bare model id stays bare, and an empty model still omits --model entirely
+// so pi resolves its own default.
+func TestBuildPiArgsBareAndEmptyModels(t *testing.T) {
+	bare := buildPiArgs("", ExecOptions{Model: "  claude-opus-5  "}, slog.Default())
+	if joined := strings.Join(bare, " "); !strings.Contains(joined, "--model claude-opus-5") {
+		t.Errorf("bare model not forwarded (or not trimmed): %v", bare)
+	}
+
+	empty := buildPiArgs("", ExecOptions{Model: "   "}, slog.Default())
+	for _, arg := range empty {
+		if arg == "--model" {
+			t.Errorf("blank model should omit --model so pi picks its default: %v", empty)
 		}
 	}
 }

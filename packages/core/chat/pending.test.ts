@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   enqueuePendingChatTask,
@@ -45,6 +46,68 @@ describe("pending chat queue", () => {
       queued_tasks: [queued],
     });
   });
+
+  it.each(["FIFO", "reversed"])(
+    "preserves multiple follow-ups before the head loads (%s responses)",
+    (order) => {
+      const first = {
+        ...task("first", "2026-01-01T00:00:01Z"),
+        message_id: "message-first",
+      };
+      const second = {
+        ...task("second", "2026-01-01T00:00:02Z"),
+        message_id: "message-second",
+      };
+      const earlier = order === "FIFO" ? first : second;
+      const later = order === "FIFO" ? second : first;
+      const waitingForHead = {
+        ...enqueuePendingChatTask(undefined, earlier, true),
+        supports_queue: true,
+      };
+
+      const result = enqueuePendingChatTask(waitingForHead, later, true);
+
+      expect(result.task_id).toBeUndefined();
+      expect(result.supports_queue).toBe(true);
+      expect(result.queued_tasks).toEqual([first, second]);
+      expect(waitingForHead.queued_tasks).toEqual([earlier]);
+
+      const head = task("head", "2026-01-01T00:00:00Z");
+      expect(enqueuePendingChatTask(result, head, false)).toEqual({
+        ...head,
+        supports_queue: true,
+        queued_tasks: [first, second],
+      });
+    },
+  );
+
+  it.each(["rich-first", "sparse-first"])(
+    "deduplicates headless follow-ups without losing previews or siblings (%s)",
+    (order) => {
+      const rich = {
+        ...task("first", "2026-01-01T00:00:01Z"),
+        message_id: "message-first",
+      };
+      const sparse = {
+        task_id: rich.task_id,
+        status: rich.status,
+        created_at: rich.created_at,
+      };
+      const sibling = {
+        ...task("second", "2026-01-01T00:00:02Z"),
+        message_id: "message-second",
+      };
+      const initial = order === "rich-first" ? rich : sparse;
+      const duplicate = order === "rich-first" ? sparse : rich;
+      const waitingForHead = enqueuePendingChatTask(undefined, initial, true);
+      const withSibling = enqueuePendingChatTask(waitingForHead, sibling, true);
+
+      const result = enqueuePendingChatTask(withSibling, duplicate, true);
+
+      expect(result.task_id).toBeUndefined();
+      expect(result.queued_tasks).toEqual([rich, sibling]);
+    },
+  );
 
   it("preserves a follow-up when its response arrives before the head response", () => {
     const followUp = {
@@ -289,5 +352,59 @@ describe("pending chat queue", () => {
     const result = removePendingChatTask(current, "active");
     expect(result.task_id).toBe("send-now");
     expect(result.queued_tasks?.map((item) => item.task_id)).toEqual(["next"]);
+  });
+});
+
+describe("promotePendingChatTask wait_reason", () => {
+  const waiting = "waiting_local_directory";
+
+  it("keeps the reason a hold arrives with", () => {
+    const promoted = promotePendingChatTask(
+      { task_id: "t1", status: "dispatched" },
+      "t1",
+      waiting,
+      undefined,
+      "NuvioTV (held by task a1b2c3d4)",
+    );
+    expect(promoted.status).toBe(waiting);
+    expect(promoted.wait_reason).toBe("NuvioTV (held by task a1b2c3d4)");
+  });
+
+  it("carries the cached reason across repeat events for the same hold", () => {
+    // The daemon stamps wait_reason once; a later event for the same parked
+    // task may arrive without it, and the pill must not blank mid-wait.
+    const promoted = promotePendingChatTask(
+      { task_id: "t1", status: waiting, wait_reason: "NuvioTV" },
+      "t1",
+      waiting,
+    );
+    expect(promoted.wait_reason).toBe("NuvioTV");
+  });
+
+  it("drops the reason the moment the task stops waiting", () => {
+    // The server never clears the column, so a task that has been running for
+    // ten minutes would otherwise still claim to be held by another task.
+    const promoted = promotePendingChatTask(
+      { task_id: "t1", status: waiting, wait_reason: "NuvioTV" },
+      "t1",
+      "running",
+    );
+    expect(promoted.status).toBe("running");
+    expect(promoted.wait_reason).toBeUndefined();
+  });
+
+  it("does not inherit a reason when a queued follow-up is promoted", () => {
+    const promoted = promotePendingChatTask(
+      {
+        task_id: "t1",
+        status: waiting,
+        wait_reason: "NuvioTV",
+        queued_tasks: [{ task_id: "t2", status: "queued", created_at: "2026-07-01T00:00:00Z" }],
+      },
+      "t2",
+      "running",
+    );
+    expect(promoted.task_id).toBe("t2");
+    expect(promoted.wait_reason).toBeUndefined();
   });
 });

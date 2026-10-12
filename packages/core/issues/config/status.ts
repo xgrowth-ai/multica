@@ -1,50 +1,55 @@
-import type { IssueStatusCategory } from "../../types";
+import type { BuiltInIssueStatus, IssueStatusCategory } from "../../types";
 
-// These three are keyed on CATEGORY, not on status key. A workspace can define
-// any number of custom statuses, but every one of them belongs to exactly one
-// of the 7 categories below — so board columns, the presentation config and the
-// paginated fetch all keep a fixed shape. Resolve a status KEY to its category
-// with the workspace catalog (`useIssueStatuses`) before indexing these.
-// (MUL-6243)
+// Status keys remain open because workspaces can define their own. Lifecycle
+// categories group those keys into stable board and query columns.
+export const STATUS_ORDER: IssueStatusCategory[] = ["unstarted", "started", "done", "closed"];
+export const ALL_STATUSES: IssueStatusCategory[] = [...STATUS_ORDER];
 
-export const STATUS_ORDER: IssueStatusCategory[] = [
-  "backlog",
-  "todo",
-  "in_progress",
-  "in_review",
-  "pending_verification",
-  "done",
-  "blocked",
-  "cancelled",
+/** Accept legacy category spellings and concrete built-in status keys. */
+export function normalizeIssueStatusCategory(value: string): IssueStatusCategory | null {
+  if (value === "completed") return "done";
+  if (value === "canceled") return "closed";
+  if (STATUS_ORDER.includes(value as IssueStatusCategory)) return value as IssueStatusCategory;
+  return Object.hasOwn(BUILT_IN_STATUS_CATEGORY, value)
+    ? BUILT_IN_STATUS_CATEGORY[value as BuiltInIssueStatus]
+    : null;
+}
+
+export const BUILT_IN_STATUS_ORDER: BuiltInIssueStatus[] = [
+  "backlog", "todo", "in_progress", "in_review", "pending_verification", "blocked", "done", "cancelled",
 ];
 
-export const ALL_STATUSES: IssueStatusCategory[] = [
-  "backlog",
-  "todo",
-  "in_progress",
-  "in_review",
-  "pending_verification",
-  "done",
-  "blocked",
-  "cancelled",
-];
+export const BUILT_IN_STATUS_CATEGORY: Record<BuiltInIssueStatus, IssueStatusCategory> = {
+  backlog: "unstarted",
+  todo: "unstarted",
+  in_progress: "started",
+  in_review: "started",
+  pending_verification: "started",
+  blocked: "started",
+  done: "done",
+  cancelled: "closed",
+};
 
-export const STATUS_CONFIG: Record<
-  IssueStatusCategory,
-  {
-    label: string;
-    iconColor: string;
-    hoverBg: string;
-    dividerColor: string;
-    columnBg: string;
-  }
-> = {
-  backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
-  todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
-  in_progress: { label: "In Progress", iconColor: "text-warning", hoverBg: "hover:bg-warning/10", dividerColor: "bg-warning", columnBg: "bg-warning/5" },
-  in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10", dividerColor: "bg-success", columnBg: "bg-success/5" },
-  pending_verification: { label: "Pending Verification", iconColor: "text-info", hoverBg: "hover:bg-info/10", dividerColor: "bg-info", columnBg: "bg-info/5" },
+export const BUILT_IN_STATUS_LABEL: Record<BuiltInIssueStatus, string> = {
+  backlog: "Backlog",
+  todo: "Todo",
+  in_progress: "In Progress",
+  in_review: "In Review",
+  pending_verification: "Pending Verification",
+  blocked: "Blocked",
+  done: "Done",
+  cancelled: "Cancelled",
+};
+
+export const STATUS_CONFIG: Record<IssueStatusCategory, {
+  label: string;
+  iconColor: string;
+  hoverBg: string;
+  dividerColor: string;
+  columnBg: string;
+}> = {
+  unstarted: { label: "Unstarted", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
+  started: { label: "Started", iconColor: "text-warning", hoverBg: "hover:bg-warning/10", dividerColor: "bg-warning", columnBg: "bg-warning/5" },
   done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10", dividerColor: "bg-info", columnBg: "bg-info/5" },
-  blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10", dividerColor: "bg-destructive", columnBg: "bg-destructive/5" },
-  cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
+  closed: { label: "Closed", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
 };

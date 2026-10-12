@@ -44,7 +44,7 @@ func TestLocalUploadsRequireIdentityAndWorkspaceMembership(t *testing.T) {
 	}
 	// The actual router wraps this route in Auth; client identity headers
 	// without a valid credential must never reach the storage handler.
-	guard := middleware.Auth(h.Queries, nil, nil)(http.HandlerFunc(h.ServeLocalUpload))
+	guard := middleware.Auth(h.Queries, nil, nil, nil)(http.HandlerFunc(h.ServeLocalUpload))
 	req := testutil.WithHeaders(testutil.JSONRequest("GET", "/uploads/"+key, nil), "X-User-ID", testUserID)
 	testutil.Call(t, guard.ServeHTTP, req).Want(401)
 	user, err := h.Queries.GetUser(req.Context(), parseUUID(testUserID))

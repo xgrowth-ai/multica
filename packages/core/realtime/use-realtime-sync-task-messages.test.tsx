@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
-import { backfillTaskMessages, chatKeys, taskMessagesOptions } from "../chat/queries";
+import { chatKeys, taskMessagesOptions } from "../chat/queries";
 import type { TaskMessagePayload } from "../types/events";
 import type { WSClient } from "../api/ws-client";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
@@ -126,24 +126,23 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
     // Mounting registers the cache entry immediately; the queryFn above has
     // not resolved yet. A frame landing in that window must still be kept.
     handler(msg(HELD_TASK, 1));
-    vi.advanceTimersByTime(FLUSH_MS);
 
     expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1]);
     release();
   });
 
-  it("coalesces a burst into a single cache write", () => {
+  it("writes a burst's first frame immediately and coalesces its tail", () => {
     const handler = mount();
     const release = holdTimeline(HELD_TASK);
     const writes = vi.spyOn(qc, "setQueryData");
 
     for (let seq = 1; seq <= 5; seq++) handler(msg(HELD_TASK, seq));
-    // Nothing is written until the window closes.
-    expect(writes).not.toHaveBeenCalled();
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1]);
 
     vi.advanceTimersByTime(FLUSH_MS);
 
-    expect(writes).toHaveBeenCalledTimes(1);
+    expect(writes).toHaveBeenCalledTimes(2);
     expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1, 2, 3, 4, 5]);
     release();
   });
@@ -162,64 +161,6 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
     release();
   });
 
-  it("backfills the full row once per flush when the broadcast copy was truncated", async () => {
-    // The mounted view's own fetch finds nothing yet, so the ONLY path to the
-    // full text is the backfill this test is about.
-    const handler = mount();
-    const release = holdTimeline(HELD_TASK);
-    // Let the view's own fetch settle before touching the mock: a resolving
-    // queryFn REPLACES the cache, so an in-flight one would clobber the frames.
-    await vi.waitFor(() => expect(cached(qc, HELD_TASK)).toEqual([]));
-    listTaskMessages.mockClear();
-    listTaskMessages.mockResolvedValue([
-      msg(HELD_TASK, 1, { input: { content: "full body" } }),
-      msg(HELD_TASK, 2, { input: { content: "full body 2" } }),
-    ]);
-
-    handler(msg(HELD_TASK, 1, { input: { content: "clip" }, truncated: true }));
-    handler(msg(HELD_TASK, 2, { input: { content: "clip" }, truncated: true }));
-    vi.advanceTimersByTime(FLUSH_MS);
-
-    // Two truncated frames in one window cost one refetch, not two.
-    expect(listTaskMessages).toHaveBeenCalledTimes(1);
-    // The clipped copy is rendered immediately — the backfill is a repair pass,
-    // not a gate on showing the row at all.
-    expect(cached(qc, HELD_TASK)?.[0]?.input).toEqual({ content: "clip" });
-
-    await vi.waitFor(() => {
-      // mergeTaskMessagesBySeq lets the cached entry win on conflict, so the
-      // backfill has to evict the clipped rows or they would be pinned forever.
-      expect(cached(qc, HELD_TASK)?.map((m) => m.input)).toEqual([
-        { content: "full body" },
-        { content: "full body 2" },
-      ]);
-      expect(cached(qc, HELD_TASK)?.some((m) => m.truncated)).toBe(false);
-    });
-    release();
-  });
-
-  it("leaves a clipped row that the backfill response did not cover", async () => {
-    const handler = mount();
-    const release = holdTimeline(HELD_TASK);
-    await vi.waitFor(() => expect(cached(qc, HELD_TASK)).toEqual([]));
-    listTaskMessages.mockClear();
-    // A response snapshotted before seq 2 was persisted — the racing backfill
-    // of a later flush must not delete a row it simply has not seen yet.
-    listTaskMessages.mockResolvedValue([msg(HELD_TASK, 1, { input: { content: "full body" } })]);
-
-    handler(msg(HELD_TASK, 1, { input: { content: "clip" }, truncated: true }));
-    handler(msg(HELD_TASK, 2, { input: { content: "clip 2" }, truncated: true }));
-    vi.advanceTimersByTime(FLUSH_MS);
-
-    await vi.waitFor(() => {
-      expect(cached(qc, HELD_TASK)?.[0]?.input).toEqual({ content: "full body" });
-    });
-    // seq 2 survives, still clipped, waiting for the next backfill.
-    expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1, 2]);
-    expect(cached(qc, HELD_TASK)?.[1]?.input).toEqual({ content: "clip 2" });
-    release();
-  });
-
   it("keeps live frames that landed while the first fetch was still in flight", async () => {
     // The regression P0-a newly exposes. Before it, the cache was pre-seeded by
     // the WS handler, so opening a live task found fresh data (staleTime:
@@ -235,9 +176,8 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
     const release = holdTimeline(HELD_TASK);
     await vi.waitFor(() => expect(listTaskMessages).toHaveBeenCalled());
 
-    // Live frame arrives and flushes while the request is still open.
+    // The leading-edge live frame lands while the request is still open.
     handler(msg(HELD_TASK, 2, { content: "live" }));
-    vi.advanceTimersByTime(FLUSH_MS);
     expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([2]);
 
     // The response was snapshotted before seq 2 was persisted.
@@ -247,24 +187,6 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
       expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1, 2]);
     });
     expect(cached(qc, HELD_TASK)?.[1]?.content).toBe("live");
-    release();
-  });
-
-  it("lets the fetched row win over a clipped one for the same seq", async () => {
-    const handler = mount();
-    const release = holdTimeline(HELD_TASK);
-    await vi.waitFor(() => expect(cached(qc, HELD_TASK)).toEqual([]));
-
-    handler(msg(HELD_TASK, 1, { input: { content: "clip" }, truncated: true }));
-    vi.advanceTimersByTime(FLUSH_MS);
-    // Server data is authoritative: the clipped copy must not survive.
-    expect(cached(qc, HELD_TASK)?.[0]?.truncated).toBe(true);
-
-    listTaskMessages.mockResolvedValue([msg(HELD_TASK, 1, { input: { content: "full" } })]);
-    await backfillTaskMessages(qc, HELD_TASK);
-
-    expect(cached(qc, HELD_TASK)?.[0]?.input).toEqual({ content: "full" });
-    expect(cached(qc, HELD_TASK)?.[0]?.truncated).toBeUndefined();
     release();
   });
 
@@ -282,8 +204,10 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
     const release = holdTimeline(HELD_TASK);
     await vi.waitFor(() => expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1]));
 
-    // Frame batched while the entry is still held, then the viewer closes.
+    // The leading edge writes immediately. The second frame is batched while
+    // the entry is still held, then the viewer closes.
     handler(msg(HELD_TASK, 2, { content: "live" }));
+    handler(msg(HELD_TASK, 3, { content: "batched tail" }));
     release();
 
     // GC lands first (50ms), flush second (100ms).
@@ -302,46 +226,5 @@ describe("useRealtimeSync — task:message fanout guards (MUL-6396)", () => {
     await vi.waitFor(() => expect(listTaskMessages).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(cached(qc, HELD_TASK)?.map((m) => m.seq)).toEqual([1]));
     reopen();
-  });
-
-  it("does not backfill a timeline that was collected while the batch waited", async () => {
-    qc = new QueryClient({
-      defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: 50 } },
-    });
-    const handler = mount();
-    const release = holdTimeline(HELD_TASK);
-    await vi.waitFor(() => expect(cached(qc, HELD_TASK)).toEqual([]));
-    listTaskMessages.mockClear();
-
-    handler(msg(HELD_TASK, 1, { input: { content: "clip" }, truncated: true }));
-    release();
-    vi.advanceTimersByTime(120);
-
-    // The batch was dropped, so its repair fetch must be dropped with it —
-    // otherwise the response would rebuild the very entry GC just removed.
-    expect(listTaskMessages).not.toHaveBeenCalled();
-    expect(qc.getQueryCache().find({ queryKey: chatKeys.taskMessages(HELD_TASK) })).toBeUndefined();
-  });
-
-  it("does not rebuild a collected timeline when a backfill response lands late", async () => {
-    // The same invariant on the async side: the entry can go away while the
-    // repair request is in flight.
-    listTaskMessages.mockResolvedValue([msg(HELD_TASK, 1)]);
-
-    await backfillTaskMessages(qc, HELD_TASK);
-
-    expect(qc.getQueryCache().find({ queryKey: chatKeys.taskMessages(HELD_TASK) })).toBeUndefined();
-  });
-
-  it("does not refetch when nothing was truncated", () => {
-    const handler = mount();
-    const release = holdTimeline(HELD_TASK);
-    listTaskMessages.mockClear();
-
-    handler(msg(HELD_TASK, 1));
-    vi.advanceTimersByTime(FLUSH_MS);
-
-    expect(listTaskMessages).not.toHaveBeenCalled();
-    release();
   });
 });

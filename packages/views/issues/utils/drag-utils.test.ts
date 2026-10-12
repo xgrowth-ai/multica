@@ -8,6 +8,7 @@ import {
   getMoveUpdates,
   insertIdByPosition,
   issueMatchesGroup,
+  projectGroupId,
   propertyGroupId,
 } from "./drag-utils";
 
@@ -94,18 +95,12 @@ describe("insertIdByPosition", () => {
   });
 });
 
-/**
- * Status columns are CATEGORIES while `issue.status` is a concrete KEY. Every
- * assertion here is a card on a custom status: bucketing it by the raw key
- * produced a column id no column has, so the card was dropped from the board
- * and the list — filtering by that status left a visibly empty column next to
- * a non-zero header count (MUL-6409).
- */
+/** Same-category statuses still have independent column identities. */
 describe("status grouping with custom statuses", () => {
   const custom = {
     ...mk("custom", 1),
     status: "awaiting_response",
-    status_category: "in_review",
+    status_category: "started",
   } as Issue;
   const builtIn = { ...mk("built-in", 2), status: "in_review" } as Issue;
   const inReviewColumn: BoardColumnGroup = {
@@ -113,28 +108,39 @@ describe("status grouping with custom statuses", () => {
     title: "In Review",
     status: "in_review",
   };
-  const todoColumn: BoardColumnGroup = { id: "status:todo", title: "Todo", status: "todo" };
-  const doneColumn: BoardColumnGroup = { id: "status:done", title: "Done", status: "done" };
+  const customColumn: BoardColumnGroup = { id: "status:awaiting_response", title: "Awaiting Response", status: "awaiting_response" };
+  const todoColumn: BoardColumnGroup = {
+    id: "status:todo",
+    title: "Todo",
+    status: "todo",
+  };
+  const doneColumn: BoardColumnGroup = {
+    id: "status:done",
+    title: "Completed",
+    status: "done",
+  };
 
-  it("buckets a custom status into its category's column", () => {
-    expect(getIssueGroupId(custom, "status")).toBe("status:in_review");
+  it("buckets custom and built-in statuses independently", () => {
+    expect(getIssueGroupId(custom, "status")).toBe("status:awaiting_response");
     expect(getIssueGroupId(builtIn, "status")).toBe("status:in_review");
   });
 
   it("renders the card in that column instead of dropping it", () => {
-    const columns = buildColumns([custom, builtIn], [inReviewColumn], "status");
-    expect(columns["status:in_review"]).toEqual(["custom", "built-in"]);
+    const columns = buildColumns([custom, builtIn], [inReviewColumn, customColumn], "status");
+    expect(columns["status:in_review"]).toEqual(["built-in"]);
+    expect(columns["status:awaiting_response"]).toEqual(["custom"]);
   });
 
   it("treats the card as already in the column it is drawn in", () => {
-    expect(issueMatchesGroup(custom, inReviewColumn)).toBe(true);
+    expect(issueMatchesGroup(custom, customColumn)).toBe(true);
+    expect(issueMatchesGroup(custom, inReviewColumn)).toBe(false);
     expect(issueMatchesGroup(custom, todoColumn)).toBe(false);
   });
 
   // A status change starts an agent run, so a same-column reorder that rewrote
   // `awaiting_response` to `in_review` would be a silent, side-effecting edit.
   it("reorders within the column without rewriting the status", () => {
-    expect(getMoveUpdates(inReviewColumn, 5, custom)).toEqual({ position: 5 });
+    expect(getMoveUpdates(customColumn, 5, custom)).toEqual({ position: 5 });
   });
 
   it("still sets the status when the card moves to another column", () => {
@@ -148,10 +154,7 @@ describe("status grouping with custom statuses", () => {
   // A built-in card in its own column keeps carrying the (unchanged) key, so a
   // workspace without custom statuses sends exactly the payload it always did.
   it("keeps the status in the payload for a built-in card", () => {
-    expect(getMoveUpdates(inReviewColumn, 5, builtIn)).toEqual({
-      status: "in_review",
-      position: 5,
-    });
+    expect(getMoveUpdates(inReviewColumn, 5, builtIn)).toEqual({ position: 5 });
   });
 });
 
@@ -191,5 +194,66 @@ describe("property grouping", () => {
 
   it("getMoveUpdates for property columns only carries position", () => {
     expect(getMoveUpdates({ id: "c1", title: "Staging", propertyId, propertyOptionId: "opt-staging" }, 5)).toEqual({ position: 5 });
+  });
+});
+
+describe("project grouping", () => {
+  const inProject = { id: "A", project_id: "proj-1" } as unknown as Issue;
+  const noProject = { id: "B", project_id: null } as unknown as Issue;
+  const projectColumn: BoardColumnGroup = {
+    id: projectGroupId("proj-1"),
+    title: "Acme",
+    projectId: "proj-1",
+  };
+  const noProjectColumn: BoardColumnGroup = {
+    id: projectGroupId(null),
+    title: "No project",
+    projectId: null,
+  };
+
+  it("projectGroupId mirrors the server group keys", () => {
+    // The board builds column ids from cards while the server builds them from
+    // descriptors; a mismatch silently drops every card off the board.
+    expect(projectGroupId("proj-1")).toBe("project:proj-1");
+    expect(projectGroupId(null)).toBe("project:none");
+  });
+
+  it("getIssueGroupId buckets unassigned-project cards into the none column", () => {
+    expect(getIssueGroupId(inProject, "project")).toBe(projectGroupId("proj-1"));
+    expect(getIssueGroupId(noProject, "project")).toBe(projectGroupId(null));
+  });
+
+  it("issueMatchesGroup distinguishes project and no-project columns", () => {
+    expect(issueMatchesGroup(inProject, projectColumn)).toBe(true);
+    expect(issueMatchesGroup(inProject, noProjectColumn)).toBe(false);
+    expect(issueMatchesGroup(noProject, noProjectColumn)).toBe(true);
+    expect(issueMatchesGroup(noProject, projectColumn)).toBe(false);
+  });
+
+  it("getMoveUpdates writes the column's project, clearing it on the none column", () => {
+    expect(getMoveUpdates(projectColumn, 5)).toEqual({
+      project_id: "proj-1",
+      position: 5,
+    });
+    expect(getMoveUpdates(noProjectColumn, 5)).toEqual({
+      project_id: null,
+      position: 5,
+    });
+  });
+
+  it("a project column never falls through to the unassigned-assignee update", () => {
+    // projectId/assigneeId are both optional on BoardColumnGroup, so an
+    // unguarded project column would read as "no assignee" and unassign the
+    // card on every drop.
+    expect(getMoveUpdates(projectColumn, 5)).not.toHaveProperty("assignee_type");
+  });
+
+  it("buildColumns places cards into their project column", () => {
+    expect(
+      buildColumns([inProject, noProject], [projectColumn, noProjectColumn], "project"),
+    ).toEqual({
+      [projectGroupId("proj-1")]: ["A"],
+      [projectGroupId(null)]: ["B"],
+    });
   });
 });

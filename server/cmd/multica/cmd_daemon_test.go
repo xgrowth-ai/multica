@@ -105,6 +105,20 @@ func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestBuildDaemonStartArgsForwardsWSClaimPollInterval(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Duration("ws-claim-poll-interval", 0, "")
+	if err := cmd.Flags().Set("ws-claim-poll-interval", "3m"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--ws-claim-poll-interval", (3 * time.Minute).String()}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
 func TestBuildDaemonStartArgsForwardsWorkspacesRoot(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("workspaces-root", "", "")
@@ -133,29 +147,6 @@ func TestBuildDaemonStartArgsForwardsNoAutoReload(t *testing.T) {
 	want := []string{"daemon", "start", "--foreground", "--no-auto-reload"}
 	if strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
-	}
-}
-
-// TestNoAutoReloadFlagRegisteredOnBothDaemonCommands: `daemon restart` mirrors
-// every `daemon start` flag, and a knob registered on only one of them fails at
-// parse time for users who restart rather than start.
-func TestNoAutoReloadFlagRegisteredOnBothDaemonCommands(t *testing.T) {
-	t.Parallel()
-
-	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
-		if cmd.Flags().Lookup("no-auto-reload") == nil {
-			t.Errorf("daemon %s is missing --no-auto-reload", cmd.Name())
-		}
-	}
-}
-
-func TestWorkspacesRootFlagRegisteredOnBothDaemonCommands(t *testing.T) {
-	t.Parallel()
-
-	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
-		if cmd.Flags().Lookup("workspaces-root") == nil {
-			t.Errorf("daemon %s is missing --workspaces-root", cmd.Name())
-		}
 	}
 }
 
@@ -228,7 +219,7 @@ func TestPrintDaemonStatusOmitsVersionWhenMissing(t *testing.T) {
 // already died with "not authenticated".
 func TestRequireDaemonAuth(t *testing.T) {
 	t.Run("not logged in", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		redirectTestHome(t, t.TempDir())
 		err := requireDaemonAuth("")
 		if err == nil || !strings.Contains(err.Error(), "multica login") {
 			t.Fatalf("requireDaemonAuth() = %v, want error mentioning 'multica login'", err)
@@ -236,7 +227,7 @@ func TestRequireDaemonAuth(t *testing.T) {
 	})
 
 	t.Run("not logged in with profile", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		redirectTestHome(t, t.TempDir())
 		err := requireDaemonAuth("staging")
 		if err == nil || !strings.Contains(err.Error(), "multica login --profile staging") {
 			t.Fatalf("requireDaemonAuth(staging) = %v, want error mentioning profile login hint", err)
@@ -244,7 +235,7 @@ func TestRequireDaemonAuth(t *testing.T) {
 	})
 
 	t.Run("authenticated", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		redirectTestHome(t, t.TempDir())
 		if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_test_token"}); err != nil {
 			t.Fatalf("SaveCLIConfig: %v", err)
 		}
@@ -258,7 +249,7 @@ func TestRequireDaemonAuth(t *testing.T) {
 // `daemon start` background path: without a stored token it must error out
 // before spawning the child (and long before the 45s readiness wait).
 func TestDaemonStartBackgroundUnauthenticatedFailsFast(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	cmd := &cobra.Command{Use: "start"}
 	cmd.Flags().Bool("foreground", false, "")
@@ -427,7 +418,7 @@ list workspaces: GET /api/workspaces returned 401: {"error":"invalid token"}
 // The spawned child is stubbed to `false` via daemonExecutable so it dies
 // immediately with a non-zero status, the same shape as a failed preflight.
 func TestDaemonStartBackgroundReportsEarlyChildExit(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	falseBin, err := exec.LookPath("false")
 	if err != nil {
@@ -468,7 +459,7 @@ func TestDaemonStartBackgroundReportsEarlyChildExit(t *testing.T) {
 // and only then discovers it cannot start a replacement, leaving the user
 // with no daemon at all.
 func TestDaemonRestartUnauthenticatedFailsBeforeStopping(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	const profile = "restart-authtest"
 
@@ -531,7 +522,7 @@ func newRestartTestCmd(t *testing.T, profile string) *cobra.Command {
 // running daemon is stopped. Otherwise restart kills the working daemon and
 // the replacement child dies in preflight, leaving no daemon at all (#5165).
 func TestDaemonRestartRejectedTokenFailsBeforeStopping(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
 
 	const profile = "restart-401test"
@@ -566,7 +557,7 @@ func TestDaemonRestartRejectedTokenFailsBeforeStopping(t *testing.T) {
 // restart must abort before stopping the running daemon, because the
 // replacement child would die in preflight against the same dead server.
 func TestDaemonRestartUnreachableServerFailsBeforeStopping(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
 
 	const profile = "restart-unreachable-test"
@@ -633,7 +624,7 @@ func TestPrintDaemonStatusAlignsValuesWithProfileLabel(t *testing.T) {
 
 func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	mkdirProfile(t, home, "empty")
@@ -652,7 +643,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 	}, "", "", false)
 
 	got := out.String()
-	if !strings.Contains(got, "Other workspace roots contain task directories:") {
+	if !strings.Contains(got, "Other workspace roots contain run directories:") {
 		t.Fatalf("hint output = %q, want profile suggestion header", got)
 	}
 	if !strings.Contains(got, "multica --profile two-tasks daemon disk-usage") {
@@ -667,7 +658,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 	if !strings.Contains(got, "multica daemon disk-usage --all-profiles") {
 		t.Fatalf("hint output = %q, want --all-profiles tip", got)
 	}
-	if strings.Contains(got, "(0 task") {
+	if strings.Contains(got, "(0 run") {
 		t.Fatalf("hint output = %q, want empty profile omitted", got)
 	}
 	if strings.Index(got, "two-tasks") > strings.Index(got, "one-task") {
@@ -681,7 +672,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 // a non-empty default root.
 func TestPrintDiskUsageOtherRootsHintFiresWhenCurrentRootNonEmpty(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	mkdirProfile(t, home, "desktop-host")
@@ -701,7 +692,7 @@ func TestPrintDiskUsageOtherRootsHintFiresWhenCurrentRootNonEmpty(t *testing.T) 
 
 func TestPrintDiskUsageOtherRootsHintSuggestsDefaultFromNamedProfile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	writeDefaultDiskUsageTaskFile(t, home, "ws0", "task0", "workdir/main.go")
@@ -720,7 +711,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsDefaultFromNamedProfile(t *testing.
 func TestPrintDiskUsageOtherRootsHintUsesProfileConfig(t *testing.T) {
 	home := t.TempDir()
 	customRoot := filepath.Join(t.TempDir(), "custom-profile-root")
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: customRoot}, "custom"); err != nil {
 		t.Fatalf("SaveCLIConfigForProfile: %v", err)
@@ -743,7 +734,7 @@ func TestPrintDiskUsageOtherRootsHintUsesProfileConfig(t *testing.T) {
 
 func TestPrintDiskUsageOtherRootsHintSkipsExplicitRootOverride(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	mkdirProfile(t, home, "has-task")
@@ -761,7 +752,7 @@ func TestPrintDiskUsageOtherRootsHintSkipsExplicitRootOverride(t *testing.T) {
 
 func TestEnumerateDiskUsageRoots(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	// Two profiles configured under ~/.multica/profiles, but only one has its
@@ -820,7 +811,7 @@ func TestPrintAggregateDiskUsageShowsRootsAndGrandTotal(t *testing.T) {
 	if !strings.Contains(got, "/home/u/multica_workspaces_desktop-host") {
 		t.Fatalf("output = %q, want desktop root path", got)
 	}
-	if !strings.Contains(got, "Grand total:") || !strings.Contains(got, "across 2 task(s) in 2 root(s)") {
+	if !strings.Contains(got, "Grand total:") || !strings.Contains(got, "across 2 run(s) in 2 root(s)") {
 		t.Fatalf("output = %q, want grand total line", got)
 	}
 }

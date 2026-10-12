@@ -4,3 +4,6 @@ docker/entrypoint.sh text eol=lf
 
 # Default behavior
 * text=auto
+
+# Unified patch files represent empty context lines with a single space.
+apps/mobile/patches/*.patch whitespace=-blank-at-eol

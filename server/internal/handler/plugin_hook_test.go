@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
 )
 
@@ -47,9 +49,9 @@ const hookHandlerTestManifest = `{
 
 func installHookPlugin(t *testing.T) string {
 	t.Helper()
-	source := withLocalPluginSource(t, hookHandlerTestManifest)
+	versionID := withLocalPluginSource(t, hookHandlerTestManifest)
 	body, _ := json.Marshal(map[string]any{
-		"source_url":     source,
+		"version_id":     versionID,
 		"granted_scopes": []string{"issues:read", "comments:write", "net:example.com"},
 	})
 	recorder := httptest.NewRecorder()
@@ -68,7 +70,7 @@ func installHookPlugin(t *testing.T) string {
 
 func invokeHookRequest(installationID, hookKey string, payload map[string]any) *http.Request {
 	body, _ := json.Marshal(payload)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/plugin/hooks/"+hookKey, bytes.NewReader(body))
+	request := httptest.NewRequest(http.MethodPost, "/api/plugin-bridge/v1/hooks/"+hookKey, bytes.NewReader(body))
 	request.Header.Set("X-User-ID", testUserID)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(pluginInstallationHeader, installationID)
@@ -127,15 +129,11 @@ func TestInvokePluginHookRefusesUnknownHook(t *testing.T) {
 // The flag gates the hook endpoint like every other plugin route: fail closed,
 // not merely hidden from the UI.
 func TestInvokePluginHookRequiresTheFeatureFlag(t *testing.T) {
-	withPluginsV1Flag(t, testHandler, true)
-	cleanupPluginInstallations(t)
-	installationID := installHookPlugin(t)
-
 	withPluginsV1Flag(t, testHandler, false)
 	recorder := httptest.NewRecorder()
-	testHandler.InvokePluginHook(recorder, invokeHookRequest(installationID, "summarize", map[string]any{"trigger": "manual"}))
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status=%d body=%s, want 503", recorder.Code, recorder.Body.String())
+	testHandler.InvokePluginHook(recorder, invokeHookRequest("11111111-1111-1111-1111-111111111111", "summarize", map[string]any{"trigger": "manual"}))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s, want 403", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -196,6 +194,53 @@ func TestRotatePluginTokenIssuesOnceAndInvalidatesThePrevious(t *testing.T) {
 	// time an admin rotates the token.
 	if second.SigningSecret != first.SigningSecret {
 		t.Fatal("the signing secret must be stable across token rotations")
+	}
+}
+
+func TestRotatePluginTokenDoesNotRequireHookSigning(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	installationID := installHookPlugin(t)
+	previousKey := testHandler.PluginService.DeploymentKey
+	testHandler.PluginService.DeploymentKey = nil
+	t.Cleanup(func() { testHandler.PluginService.DeploymentKey = previousKey })
+
+	issued := rotateToken(t, installationID)
+	if issued.Token == "" {
+		t.Fatal("rotation did not return a Public API token")
+	}
+	if issued.SigningSecret != "" {
+		t.Fatalf("signing_secret = %q without a deployment key", issued.SigningSecret)
+	}
+	installation, err := testHandler.PluginService.AuthenticateInstallToken(context.Background(), issued.Token)
+	if err != nil {
+		t.Fatalf("token issued without hook signing must authenticate: %v", err)
+	}
+	if uuidToString(installation.ID) != installationID {
+		t.Fatalf("token resolved to %s, want %s", uuidToString(installation.ID), installationID)
+	}
+}
+
+func TestRotatePluginTokenPreservesPreviousTokenWhenPreparationFails(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	installationID := installHookPlugin(t)
+	previousKey := testHandler.PluginService.DeploymentKey
+	t.Cleanup(func() { testHandler.PluginService.DeploymentKey = previousKey })
+
+	testHandler.PluginService.DeploymentKey = bytes.Repeat([]byte{9}, 32)
+	previous := rotateToken(t, installationID)
+	testHandler.PluginService.DeploymentKey = []byte("invalid")
+
+	response := httptest.NewRecorder()
+	testHandler.RotatePluginToken(response, pluginHandlerRequest(http.MethodPost, "/token", nil, map[string]string{
+		"id": testWorkspaceID, "installationId": installationID,
+	}))
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("failed preparation status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := testHandler.PluginService.AuthenticateInstallToken(context.Background(), previous.Token); err != nil {
+		t.Fatalf("failed credential preparation invalidated the previous token: %v", err)
 	}
 }
 
@@ -276,7 +321,7 @@ func TestEventDispatchRespectsTheFeatureFlagEndToEnd(t *testing.T) {
 		`"net:example.com"`, `"net:`+host+`"`,
 	).Replace(hookHandlerTestManifest)
 
-	source := withLocalPluginSource(t, manifest)
+	versionID := withLocalPluginSource(t, manifest)
 	// The dev-origin opt-in is what lets a loopback endpoint be dialled at all;
 	// the granted net: scope still has to cover it, which the replace above did.
 	previousOrigins := testHandler.PluginService.DevOrigins
@@ -300,7 +345,7 @@ func TestEventDispatchRespectsTheFeatureFlagEndToEnd(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(map[string]any{
-		"source_url":     source,
+		"version_id":     versionID,
 		"granted_scopes": []string{"issues:read", "comments:write", "net:" + host},
 	})
 	install := httptest.NewRecorder()
@@ -309,31 +354,63 @@ func TestEventDispatchRespectsTheFeatureFlagEndToEnd(t *testing.T) {
 		t.Fatalf("install: status=%d body=%s", install.Code, install.Body.String())
 	}
 
-	dispatch := func() {
+	dispatch := func() *service.PluginEventDispatcher {
 		dispatcher := service.NewPluginEventDispatcher(testHandler.PluginService)
-		defer dispatcher.Close()
 		dispatcher.Dispatch(plugincontract.EventIssueCreated, testWorkspaceID, map[string]any{})
-		// Long enough for a worker to pick the job up and complete the call.
-		time.Sleep(2 * time.Second)
+		return dispatcher
 	}
 
 	// Flag on: the endpoint is called.
 	testHandler.PluginService.FeatureFlags = testHandler.FeatureFlags
-	dispatch()
+	dispatcher := dispatch()
 	select {
 	case <-received:
-	default:
+	case <-time.After(2 * time.Second):
+		dispatcher.Close()
 		t.Fatal("with the flag on, an installed event hook was never called")
 	}
+	dispatcher.Close()
 
 	// Flag off: nothing leaves, even though the same installation is still
 	// enabled and still declares the hook.
 	withPluginsV1Flag(t, testHandler, false)
-	testHandler.PluginService.FeatureFlags = testHandler.FeatureFlags
-	dispatch()
+	looked := make(chan struct{}, 1)
+	testHandler.PluginService.FeatureFlags = featureflag.NewService(flagLookupSignal{
+		Provider: testHandler.FeatureFlags.Provider(), key: featureflags.PluginsV1, looked: looked,
+	})
+	dispatcher = dispatch()
+	defer dispatcher.Close()
+	select {
+	case <-looked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("with the flag off, no dispatcher worker ever evaluated the flag")
+	}
+	// Close waits for the worker that read the flag to finish its job, so any
+	// call it made has already reached the endpoint. No window to wait out.
+	dispatcher.Close()
 	select {
 	case <-received:
 		t.Fatal("with the flag off, an event hook still called out — the flag does not gate the outbound path")
 	default:
 	}
+}
+
+// flagLookupSignal reports each evaluation of one flag, so a test can tell a
+// worker has reached its flag check instead of waiting out a window for a call
+// that should never come.
+type flagLookupSignal struct {
+	featureflag.Provider
+	key    string
+	looked chan<- struct{}
+}
+
+func (p flagLookupSignal) Lookup(ctx context.Context, key string) (featureflag.Decision, bool) {
+	decision, found := p.Provider.Lookup(ctx, key)
+	if key == p.key {
+		select {
+		case p.looked <- struct{}{}:
+		default:
+		}
+	}
+	return decision, found
 }

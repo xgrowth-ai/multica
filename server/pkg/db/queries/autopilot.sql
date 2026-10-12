@@ -168,23 +168,44 @@ ORDER BY created_at ASC;
 SELECT * FROM autopilot_trigger
 WHERE id = $1;
 
+-- name: GetAutopilotTriggerForAutopilot :one
+-- Trigger lookup BOUND to both the autopilot it must belong to AND that
+-- autopilot's workspace. Since MUL-6951 the trigger row decides which human a run
+-- acts as, so an unbound `WHERE id = $1` would let a trigger id from another
+-- autopilot select the principal. The workspace join closes the other half: the
+-- caller's membership check proves the resolved human belongs to the workspace it
+-- passed, not that the AUTOPILOT does, and a member of two workspaces would
+-- satisfy the former while the trigger came from the other tenant. Callers
+-- resolving an authorization principal must use this, not GetAutopilotTrigger.
+SELECT t.* FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.id = $1 AND t.autopilot_id = $2 AND a.workspace_id = $3;
+
 -- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
     next_run_at, webhook_token, label, provider, event_filters,
-    published_by_type, published_by_id
+    published_by_type, published_by_id,
+    created_by_type, created_by_id
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
     sqlc.narg('event_filters'),
-    sqlc.narg('published_by_type'), sqlc.narg('published_by_id')
+    sqlc.narg('published_by_type'), sqlc.narg('published_by_id'),
+    sqlc.narg('created_by_type'), sqlc.narg('created_by_id')
 ) RETURNING *;
 
 -- name: SetAutopilotTriggerPublisher :exec
 -- Re-stamp a single trigger's responsible publisher after a substantive edit of
--- THAT trigger (cron / filter / enabled / webhook security). Future runs it fires
--- become accountable to this member (MUL-4302 trigger_owner transfer).
+-- THAT trigger (cron / filter / enabled / webhook security), recording who is now
+-- responsible for its config (MUL-4302).
+--
+-- Since MUL-6951 this changes NOTHING about the runs it fires: they act as, and
+-- are accountable to, the trigger's immutable created_by. An edit must not be able
+-- to re-authorize the automation as the editor (Bohan's ruling), so this statement
+-- deliberately does not touch created_by, and published_by is now a config-audit
+-- column only.
 UPDATE autopilot_trigger
 SET published_by_type = $2, published_by_id = $3, updated_at = now()
 WHERE id = $1;
@@ -297,12 +318,12 @@ RETURNING *;
 -- a second run for the same (trigger_id, planned_at) pair (MUL-3551).
 INSERT INTO autopilot_run (
     autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at,
-    webhook_delivery_id, quota_reservation_id, reason_code
+    webhook_delivery_id, quota_reservation_id, reason_code, id
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
     sqlc.narg('squad_id'), sqlc.narg('planned_at'),
     sqlc.narg('webhook_delivery_id'), sqlc.narg('quota_reservation_id'),
-    sqlc.narg('reason_code')
+    sqlc.narg('reason_code'), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 ) RETURNING *;
 
 -- name: GetAutopilotRunByTriggerAndPlanned :one
@@ -571,7 +592,8 @@ ORDER BY t.id;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
     originator_user_id, accountable_user_id, rule_version_id,
-    originator_source, trigger_evidence_kind, trigger_evidence_ref_id
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    id
 )
 SELECT
     $1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary),
@@ -580,7 +602,8 @@ SELECT
     sqlc.narg(rule_version_id),
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
-    sqlc.narg(trigger_evidence_ref_id)
+    sqlc.narg(trigger_evidence_ref_id),
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;
 
@@ -599,6 +622,15 @@ LIMIT 1;
 -- name: GetAutopilotRunByIssue :one
 SELECT * FROM autopilot_run
 WHERE issue_id = $1 AND status IN ('issue_created', 'running')
+LIMIT 1;
+
+-- name: GetLatestAutopilotRunForIssueAttribution :one
+-- Attribution survives run completion; lifecycle callers still use the active-run lookup.
+SELECT r.* FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.issue_id = sqlc.arg(issue_id) AND r.autopilot_id = sqlc.arg(autopilot_id)
+  AND a.workspace_id = sqlc.arg(workspace_id)
+ORDER BY r.created_at DESC, r.id DESC
 LIMIT 1;
 
 -- name: FailAutopilotRunsByIssue :many
@@ -696,10 +728,35 @@ RETURNING *;
 -- =====================
 
 -- name: ListAutopilotSubscribers :many
+-- Only current workspace members are effective subscribers. The membership
+-- join makes legacy rows left behind by older member-removal code inert on
+-- both the detail response and the dispatch path, so clients never round-trip
+-- a hidden departed member into an otherwise valid update.
 -- ORDER BY created_at keeps chip rendering stable across refreshes.
-SELECT * FROM autopilot_subscriber
-WHERE autopilot_id = $1
-ORDER BY created_at ASC, user_id ASC;
+SELECT s.* FROM autopilot_subscriber AS s
+JOIN autopilot AS a ON a.id = s.autopilot_id
+JOIN member AS m
+  ON m.workspace_id = a.workspace_id
+ AND m.user_id = s.user_id
+WHERE s.autopilot_id = $1
+  AND s.user_type = 'member'
+ORDER BY s.created_at ASC, s.user_id ASC;
+
+-- name: ListAutopilotSubscribersForAutopilots :many
+-- Batch form of ListAutopilotSubscribers for the list endpoint, which must not
+-- issue one query per row. The autopilot_subscriber primary key leads with
+-- autopilot_id, so ANY($1) is index-supported and no extra index is needed.
+-- The member join and ordering are identical to the single-autopilot query on
+-- purpose: list and detail have to agree on who counts as a subscriber, or the
+-- two projections disagree again (MUL-6680).
+SELECT s.* FROM autopilot_subscriber AS s
+JOIN autopilot AS a ON a.id = s.autopilot_id
+JOIN member AS m
+  ON m.workspace_id = a.workspace_id
+ AND m.user_id = s.user_id
+WHERE s.autopilot_id = ANY($1::uuid[])
+  AND s.user_type = 'member'
+ORDER BY s.autopilot_id ASC, s.created_at ASC, s.user_id ASC;
 
 -- name: AddAutopilotSubscriber :exec
 INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
@@ -710,6 +767,17 @@ ON CONFLICT (autopilot_id, user_type, user_id) DO NOTHING;
 -- Paired with a re-insert loop to implement full-replace PATCH semantics.
 DELETE FROM autopilot_subscriber
 WHERE autopilot_id = $1;
+
+-- name: DeleteAutopilotSubscribersByMember :exec
+-- Autopilot subscribers carry no FK, so member removal must prune them in the
+-- same application transaction. Scope through the autopilot's workspace: the
+-- same user may remain subscribed to autopilots in another workspace.
+DELETE FROM autopilot_subscriber AS s
+USING autopilot AS a
+WHERE s.autopilot_id = a.id
+  AND a.workspace_id = sqlc.arg(workspace_id)
+  AND s.user_type = 'member'
+  AND s.user_id = sqlc.arg(user_id);
 
 -- =====================
 -- Autopilot Collaborators
