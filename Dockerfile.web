@@ -5,6 +5,8 @@ WORKDIR /app
 
 # Copy workspace config and all package.json files for dependency resolution
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json .npmrc ./
+# pnpm validates every root-declared patch, including excluded workspaces.
+COPY apps/mobile/patches/ apps/mobile/patches/
 COPY apps/web/package.json apps/web/
 # postinstall runs fumadocs-mdx which reads apps/web/source.config.ts
 COPY apps/web/source.config.ts apps/web/source.config.ts

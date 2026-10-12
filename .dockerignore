@@ -45,6 +45,11 @@ coverage
 # app workspaces so they do not silently enter the build context.
 /apps/*
 !/apps/web/
+# Root pnpm patch metadata is required even when mobile is not installed.
+!/apps/mobile/
+/apps/mobile/**
+!/apps/mobile/patches/
+!/apps/mobile/patches/*.patch
 
 # Repository-only tooling
 /.github/
